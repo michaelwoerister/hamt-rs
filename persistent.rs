@@ -48,7 +48,10 @@ impl<K:Hash + Eq + 'static, V: 'static> Node<K, V> {
                 } else if level != LAST_LEVEL {
                     // There already is an entry with different key but same hash value, so push
                     // everything down one level
-                    let new_sub_tree = Node::new_with_entries(@key, @val, k, v, level + 1);
+                    let new_hash = hash >> BITS_PER_LEVEL;
+                    let existing_hash = (*k).hash() >> (BITS_PER_LEVEL * (level + 1));
+
+                    let new_sub_tree = Node::new_with_entries(@key, @val, new_hash, k, v, existing_hash, level + 1);
                     self.copy_with_new_entry(local_key, SubTree(new_sub_tree))
                 } else {
                     let collision_entry = Collision(@~[(@key, @val), (k, v)]);
@@ -123,14 +126,16 @@ impl<K:Hash + Eq + 'static, V: 'static> Node<K, V> {
 
     fn new_with_entries(new_key: @K,
                         new_val: @V,
+                        new_hash: u64,
                         existing_key: @K,
                         existing_val: @V,
+                        existing_hash: u64,
                         level: uint)
                      -> @Node<K, V> {
         assert!(level <= LAST_LEVEL);
 
-        let new_local_key = ((*new_key).hash() >> BITS_PER_LEVEL * level) & LEVEL_BIT_MASK;
-        let existing_local_key = ((*existing_key).hash() >> BITS_PER_LEVEL * level) & LEVEL_BIT_MASK;
+        let new_local_key = new_hash & LEVEL_BIT_MASK;
+        let existing_local_key = existing_hash & LEVEL_BIT_MASK;
 
         if new_local_key != existing_local_key {
             let mask = (1 << new_local_key) | (1 << existing_local_key);
@@ -153,8 +158,10 @@ impl<K:Hash + Eq + 'static, V: 'static> Node<K, V> {
             // recurse further
             let sub_tree = Node::new_with_entries(new_key,
                                                   new_val,
+                                                  new_hash >> BITS_PER_LEVEL,
                                                   existing_key,
                                                   existing_val,
+                                                  existing_hash >> BITS_PER_LEVEL,
                                                   level + 1);
             @Node {
                 mask: 1 << new_local_key,
@@ -301,7 +308,7 @@ mod tests {
         let mut values: HashSet<u64> = HashSet::new();
         let mut rng = rand::rng();
 
-        for _ in range(0, 1000000) {
+        for _ in range(0, 500000) {
             values.insert(rand::Rand::rand(&mut rng));
         }
 
