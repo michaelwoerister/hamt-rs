@@ -33,8 +33,14 @@ struct Node<K, V> {
 }
 
 enum RemovalResult<K, V> {
+    // Don't do anything
     NoChange,
-    ChangedSubTree(Arc<Node<K, V>>),
+    // Replace the sub-tree entry with another sub-tree entry pointing to the given node
+    ReplaceSubTree(Arc<Node<K, V>>),
+    // Collapse the sub-tree into a singe-item entry
+    CollapseSubTree(Arc<K>, Arc<V>),
+    // Completely remove the entry
+    KillSubTree
 }
 
 impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
@@ -140,7 +146,7 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
         match self.entries[index] {
             SingleItem(ref existing_key, _) => {
                 if *existing_key.get() == *key {
-                    ChangedSubTree(self.copy_without_entry(local_key))
+                    self.collapse_kill_or_change(local_key, index)
                 } else {
                     NoChange
                 }
@@ -179,7 +185,7 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
                         };
 
                         let new_sub_tree = self.copy_with_new_entry(local_key, new_entry);
-                        ChangedSubTree(new_sub_tree)
+                        ReplaceSubTree(new_sub_tree)
                     }
                 }
             }
@@ -188,11 +194,43 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
 
                 match result {
                     NoChange => NoChange,
-                    ChangedSubTree(x) => {
-                        ChangedSubTree(self.copy_with_new_entry(local_key, SubTree(x)))
+                    ReplaceSubTree(x) => {
+                        ReplaceSubTree(self.copy_with_new_entry(local_key, SubTree(x)))
+                    }
+                    CollapseSubTree(k, v) => {
+                        if bit_count(self.mask) == 1 {
+                            CollapseSubTree(k, v)
+                        } else {
+                            ReplaceSubTree(self.copy_with_new_entry(local_key, SingleItem(k, v)))
+                        }
+                    },
+                    KillSubTree => {
+                        self.collapse_kill_or_change(local_key, index)
                     }
                 }
             }
+        }
+    }
+
+    // Determines how the parent node should handle the removal of the entry at local_key from this
+    // node.
+    fn collapse_kill_or_change(&self, local_key: uint, entry_index: uint) -> RemovalResult<K, V> {
+        let next_entry_count = bit_count(self.mask) - 1;
+
+        if next_entry_count > 1 {
+            ReplaceSubTree(self.copy_without_entry(local_key))
+        } else if next_entry_count == 1 {
+            let other_index = 1 - entry_index;
+
+            match self.entries[other_index] {
+                SingleItem(ref k, ref v) => {
+                    CollapseSubTree(k.clone(), v.clone())
+                }
+                _ => ReplaceSubTree(self.copy_without_entry(local_key))
+            }
+        } else {
+            assert!(next_entry_count == 0);
+            KillSubTree
         }
     }
 
@@ -384,7 +422,22 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> HamtMap<K, V> {
 
         match removal_result {
             NoChange => HamtMap { root: self.root.clone() },
-            ChangedSubTree(new_root) => HamtMap { root: new_root }
+            ReplaceSubTree(new_root) => HamtMap { root: new_root },
+            CollapseSubTree(k, v) => {
+                assert!(bit_count(self.root.get().mask) == 2);
+                let local_key = (k.get().hash() & LEVEL_BIT_MASK) as uint;
+
+                HamtMap {
+                    root: Arc::new(Node {
+                        mask: 1 << local_key,
+                        entries: ~[SingleItem(k, v)]
+                    })
+                }
+            }
+            KillSubTree => {
+                assert!(bit_count(self.root.get().mask) == 1);
+                HamtMap::new()
+            }
         }
     }
 }
@@ -501,7 +554,7 @@ mod tests {
         let mut values: HashSet<u64> = HashSet::new();
         let mut rng = rand::rng();
 
-        for _ in range(0, 1000000) {
+        for _ in range(0, 100000) {
             values.insert(rand::Rand::rand(&mut rng));
         }
 
