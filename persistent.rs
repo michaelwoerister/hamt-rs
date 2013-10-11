@@ -32,13 +32,18 @@ struct Node<K, V> {
     priv entries: ~[NodeEntry<K, V>],
 }
 
+enum RemovalResult<K, V> {
+    NoChange,
+    ChangedSubTree(Arc<Node<K, V>>),
+}
+
 impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
     fn insert(&self, hash: u64, level: uint, key: Arc<K>, val: Arc<V>) -> Arc<Node<K, V>> {
         assert!(level <= LAST_LEVEL);
 
         let local_key = (hash & LEVEL_BIT_MASK) as uint;
 
-        // See if the slot is a free
+        // See if the slot is free
         if (self.mask & (1 << local_key)) == 0 {
             // If yes, then fill it with a single-item entry
             return self.copy_with_new_entry(local_key, SingleItem(key, val));
@@ -91,8 +96,20 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
                         new_items
                     }
                     Some(position) => {
-                        let mut new_items = items.get().to_owned();
-                        new_items[position] = (key, val);
+                        let item_count = items.get().len();
+                        let mut new_items = vec::with_capacity(item_count);
+
+                        if position > 0 {
+                            new_items.push_all(items.get().slice_to(position));
+                        }
+
+                        new_items.push((key, val));
+
+                        if position < item_count - 1 {
+                           new_items.push_all(items.get().slice_from(position + 1));
+                        }
+
+                        assert!(new_items.len() == item_count);
                         new_items
                     }
                 };
@@ -100,8 +117,81 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
                 self.copy_with_new_entry(local_key, Collision(Arc::new(new_items)))
             }
             SubTree(ref sub_tree) => {
-                let new_sub_tree = sub_tree.get().insert(hash >> BITS_PER_LEVEL, level + 1, key, val);
+                let new_sub_tree = sub_tree.get().insert(hash >> BITS_PER_LEVEL,
+                                                         level + 1,
+                                                         key,
+                                                         val);
+
                 self.copy_with_new_entry(local_key, SubTree(new_sub_tree))
+            }
+        }
+    }
+
+    fn remove(&self, hash: u64, level: uint, key: &K) -> RemovalResult<K, V> {
+        assert!(level <= LAST_LEVEL);
+        let local_key = (hash & LEVEL_BIT_MASK) as uint;
+
+        if (self.mask & (1 << local_key)) == 0 {
+            return NoChange;
+        }
+
+        let index = get_index(self.mask, local_key);
+
+        match self.entries[index] {
+            SingleItem(ref existing_key, _) => {
+                if *existing_key.get() == *key {
+                    ChangedSubTree(self.copy_without_entry(local_key))
+                } else {
+                    NoChange
+                }
+            }
+            Collision(ref items) => {
+                assert!(level == LAST_LEVEL);
+                let items = items.get();
+                let position = items.iter().position(|&(ref k, _)| *k.get() == *key);
+
+                match position {
+                    None => NoChange,
+                    Some(position) => {
+                        let item_count = items.len() - 1;
+
+                        // The new entry can either still be a collision node, or it can be a simple
+                        // single-item node if the hash collision has been resolved by the removal
+                        let new_entry = if item_count > 1 {
+                            let mut new_items = vec::with_capacity(item_count);
+
+                            if position > 0 {
+                                new_items.push_all(items.slice_to(position));
+                            }
+                            if position < item_count - 1 {
+                                new_items.push_all(items.slice_from(position + 1));
+                            }
+                            assert!(new_items.len() == item_count);
+
+                            Collision(Arc::new(new_items))
+                        } else {
+                            assert!(items.len() == 2);
+                            assert!(position == 0 || position == 1);
+                            let index_of_remaining_item = 1 - position;
+                            let (k, v) = items[index_of_remaining_item].clone();
+
+                            SingleItem(k, v)
+                        };
+
+                        let new_sub_tree = self.copy_with_new_entry(local_key, new_entry);
+                        ChangedSubTree(new_sub_tree)
+                    }
+                }
+            }
+            SubTree(ref sub_tree) => {
+                let result = sub_tree.get().remove(hash >> BITS_PER_LEVEL, level + 1, key);
+
+                match result {
+                    NoChange => NoChange,
+                    ChangedSubTree(x) => {
+                        ChangedSubTree(self.copy_with_new_entry(local_key, SubTree(x)))
+                    }
+                }
             }
         }
     }
@@ -130,6 +220,37 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
             // Skip the replaced value
             i += 1;
         }
+
+        // Copy the rest
+        while i < self.entries.len() {
+            new_entry_list.push(self.entries[i].clone());
+            i += 1;
+        }
+
+        assert!(new_entry_list.len() == bit_count(new_mask));
+
+        return Arc::new(Node {
+            mask: new_mask,
+            entries: new_entry_list
+        });
+    }
+
+    fn copy_without_entry(&self, local_key: uint) -> Arc<Node<K, V>> {
+        assert!((self.mask & (1 << local_key)) != 0);
+
+        let new_mask = self.mask & !(1 << local_key);
+        let mut new_entry_list = vec::with_capacity(bit_count(new_mask));
+        let index = get_index(self.mask, local_key);
+
+        let mut i = 0;
+
+        // Copy up to index
+        while i < index {
+            new_entry_list.push(self.entries[i].clone());
+            i += 1;
+        }
+
+        i += 1;
 
         // Copy the rest
         while i < self.entries.len() {
@@ -256,6 +377,16 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> HamtMap<K, V> {
         let new_root = self.root.get().insert(hash, 0, Arc::new(key), Arc::new(val));
         HamtMap { root: new_root }
     }
+
+    fn remove(&self, key: &K) -> HamtMap<K, V> {
+        let hash = key.hash();
+        let removal_result = self.root.get().remove(hash, 0, key);
+
+        match removal_result {
+            NoChange => HamtMap { root: self.root.clone() },
+            ChangedSubTree(new_root) => HamtMap { root: new_root }
+        }
+    }
 }
 
 #[inline]
@@ -343,6 +474,29 @@ mod tests {
     }
 
     #[test]
+    fn test_remove() {
+        let map00 = HamtMap::new()
+            .insert(1, 2)
+            .insert(2, 4);
+
+        let map01 = map00.remove(&1);
+        let map10 = map00.remove(&2);
+        let map11 = map01.remove(&2);
+
+        assert_find!(map00, 1, 2);
+        assert_find!(map00, 2, 4);
+
+        assert_find!(map01, 1, None);
+        assert_find!(map01, 2, 4);
+
+        assert_find!(map11, 1, None);
+        assert_find!(map11, 2, None);
+
+        assert_find!(map10, 1, 2);
+        assert_find!(map10, 2, None);
+    }
+
+    #[test]
     fn test_random() {
         let mut values: HashSet<u64> = HashSet::new();
         let mut rng = rand::rng();
@@ -359,6 +513,20 @@ mod tests {
 
         for &x in values.iter() {
             assert_find!(map, x, x);
+        }
+
+        for (i, x) in values.iter().enumerate() {
+            if i % 2 == 0 {
+                map = map.remove(x);
+            }
+        }
+
+        for (i, &x) in values.iter().enumerate() {
+            if i % 2 != 0 {
+                assert_find!(map, x, x);
+            } else {
+                assert_find!(map, x, None);
+            }
         }
     }
 }
