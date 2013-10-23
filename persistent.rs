@@ -375,7 +375,8 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> HamtMap<K, V> {
         let mut level = 0;
         let mut current_node = &self.root;
 
-        while level <= LAST_LEVEL {
+        loop {
+            assert!(level <= LAST_LEVEL);
             let local_key = (hash & LEVEL_BIT_MASK) as uint;
 
             if (current_node.get().mask & (1 << local_key)) == 0 {
@@ -406,8 +407,6 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> HamtMap<K, V> {
                 }
             };
         }
-
-        unreachable!();
     }
 
     fn insert(&self, key: K, val: V) -> HamtMap<K, V> {
@@ -554,7 +553,7 @@ mod tests {
         let mut values: HashSet<u64> = HashSet::new();
         let mut rng = rand::rng();
 
-        for _ in range(0, 100000) {
+        for _ in range(0, 10000) {
             values.insert(rand::Rand::rand(&mut rng));
         }
 
