@@ -17,9 +17,9 @@ extern mod extra;
 pub mod hamt;
 
 
-mod persistent {
+pub mod persistent {
 
-    trait PersistentMap<K: Hash+Eq+Send+Freeze,
+    pub trait PersistentMap<K: Hash+Eq+Send+Freeze,
                         V: Send+Freeze>:
         Map<K, V> + Clone {
         /// Insert a key-value pair into the map. An existing value for a

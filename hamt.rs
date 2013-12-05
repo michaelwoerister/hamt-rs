@@ -22,12 +22,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-mod persistent {
+pub mod hamt {
 
 use std::cast;
 use std::vec;
 use std::unstable::intrinsics;
 use extra::arc::Arc;
+use persistent::PersistentMap;
 
 static LAST_LEVEL: uint = (64 / 5) - 1;
 static BITS_PER_LEVEL: uint = 5;
@@ -380,22 +381,22 @@ struct HamtMap<K, V> {
     priv root: Arc<Node<K, V>>
 }
 
+// Clone
 impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> Clone for HamtMap<K, V> {
     fn clone(&self) -> HamtMap<K, V> {
         HamtMap { root: self.root.clone() }
     }
 }
 
-impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> HamtMap<K, V> {
-
-    fn new() -> HamtMap<K, V> {
-        HamtMap {
-            root: Arc::new(Node {
-                mask: 0,
-                entries: ~[],
-            })
-        }
+// Container
+impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> Container for HamtMap<K, V> {
+    fn len(&self) -> uint {
+        0
     }
+}
+
+// Map
+impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> Map<K, V> for HamtMap<K, V> {
 
     fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
         let mut hash = key.hash();
@@ -436,18 +437,21 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> HamtMap<K, V> {
             };
         }
     }
+}
 
-    fn insert(&self, key: K, val: V) -> HamtMap<K, V> {
+impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> PersistentMap<K, V> for HamtMap<K, V> {
+
+    fn insert(&self, key: K, val: V) -> (HamtMap<K, V>, bool) {
         let hash = key.hash();
         let new_root = self.root.get().insert(hash, 0, Arc::new(key), Arc::new(val));
-        HamtMap { root: new_root }
+        (HamtMap { root: new_root }, false)
     }
 
-    fn remove(&self, key: &K) -> HamtMap<K, V> {
+    fn remove(&self, key: &K) -> (HamtMap<K, V>, bool) {
         let hash = key.hash();
         let removal_result = self.root.get().remove(hash, 0, key);
 
-        match removal_result {
+        (match removal_result {
             NoChange => HamtMap { root: self.root.clone() },
             ReplaceSubTree(new_root) => HamtMap { root: new_root },
             CollapseSubTree(k, v) => {
@@ -465,6 +469,18 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> HamtMap<K, V> {
                 assert!(bit_count(self.root.get().mask) == 1);
                 HamtMap::new()
             }
+        }, false)
+    }
+}
+
+impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> HamtMap<K, V> {
+
+    fn new() -> HamtMap<K, V> {
+        HamtMap {
+            root: Arc::new(Node {
+                mask: 0,
+                entries: ~[],
+            })
         }
     }
 }
@@ -485,6 +501,9 @@ fn bit_count(x: u32) -> uint {
         intrinsics::ctpop32(cast::transmute(x)) as uint
     }
 }
+
+
+// TESTS
 
 macro_rules! assert_find(
     ($map:ident, $key:expr, None) => (
@@ -524,9 +543,9 @@ mod tests {
     fn test_insert() {
         let map00 = HamtMap::new();
 
-        let map01 = map00.insert(1, 2);
-        let map10 = map00.insert(2, 4);
-        let map11 = map01.insert(2, 4);
+        let (map01, _) = map00.insert(1, 2);
+        let (map10, _) = map00.insert(2, 4);
+        let (map11, _) = map01.insert(2, 4);
 
         assert_find!(map00, 1, None);
         assert_find!(map00, 2, None);
@@ -544,8 +563,8 @@ mod tests {
     #[test]
     fn test_insert_overwrite() {
         let empty = HamtMap::new();
-        let mapA = empty.insert(1, 2);
-        let mapB = mapA.insert(1, 4);
+        let (mapA, _) = empty.insert(1, 2);
+        let (mapB, _) = mapA.insert(1, 4);
 
         assert_find!(empty, 1, None);
         assert_find!(mapA, 1, 2);
@@ -554,13 +573,13 @@ mod tests {
 
     #[test]
     fn test_remove() {
-        let map00 = HamtMap::new()
-            .insert(1, 2)
+        let (map00, _) = (HamtMap::new()
+            .insert(1, 2)).first()
             .insert(2, 4);
 
-        let map01 = map00.remove(&1);
-        let map10 = map00.remove(&2);
-        let map11 = map01.remove(&2);
+        let (map01, _) = map00.remove(&1);
+        let (map10, _) = map00.remove(&2);
+        let (map11, _) = map01.remove(&2);
 
         assert_find!(map00, 1, 2);
         assert_find!(map00, 2, 4);
@@ -587,7 +606,8 @@ mod tests {
         let mut map = HamtMap::new();
 
         for &x in values.iter() {
-            map = map.insert(x, x);
+            let (map1, _) = map.insert(x, x);
+            map = map1;
         }
 
         for &x in values.iter() {
@@ -596,7 +616,8 @@ mod tests {
 
         for (i, x) in values.iter().enumerate() {
             if i % 2 == 0 {
-                map = map.remove(x);
+                let (map1, _) = map.remove(x);
+                map = map1;
             }
         }
 
