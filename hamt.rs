@@ -22,10 +22,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-
-#[feature(macro_rules)]; // Used for test cases
-
-extern mod extra;
+mod persistent {
 
 use std::cast;
 use std::vec;
@@ -383,6 +380,12 @@ struct HamtMap<K, V> {
     priv root: Arc<Node<K, V>>
 }
 
+impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> Clone for HamtMap<K, V> {
+    fn clone(&self) -> HamtMap<K, V> {
+        HamtMap { root: self.root.clone() }
+    }
+}
+
 impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> HamtMap<K, V> {
 
     fn new() -> HamtMap<K, V> {
@@ -394,7 +397,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> HamtMap<K, V> {
         }
     }
 
-    fn find(&self, key: &K) -> Option<Arc<V>> {
+    fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
         let mut hash = key.hash();
 
         let mut level = 0;
@@ -412,7 +415,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> HamtMap<K, V> {
 
             match current_node.get().entries[index] {
                 SingleItem(ref k, ref val) => return if *key == *(k.get()) {
-                    Some(val.clone())
+                    Some(val.get())
                 } else {
                     None
                 },
@@ -420,7 +423,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> HamtMap<K, V> {
                     assert!(level == LAST_LEVEL);
                     let found = items.get().iter().find(|ref kvp| *(kvp.first_ref().get()) == *key);
                     return match found {
-                        Some(&(_, ref val)) => Some(val.clone()),
+                        Some(&(_, ref val)) => Some(val.get()),
                         None => None,
                     };
                 }
@@ -489,8 +492,7 @@ macro_rules! assert_find(
     );
     ($map:ident, $key:expr, $val:expr) => (
         match $map.find(&$key) {
-            Some(ref arc) => {
-                let value = *arc.get();
+            Some(&value) => {
                 assert_eq!(value, $val);
             }
             _ => fail!()
@@ -608,3 +610,4 @@ mod tests {
     }
 }
 
+}
