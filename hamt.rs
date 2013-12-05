@@ -35,8 +35,8 @@ static BITS_PER_LEVEL: uint = 5;
 static LEVEL_BIT_MASK: u64 = 0b11111;
 
 enum NodeEntry<K, V> {
-    Collision(Arc<~[(Arc<K>, Arc<V>)]>),
-    SingleItem(Arc<K>, Arc<V>),
+    Collision(Arc<~[Arc<(K, V)>]>),
+    SingleItem(Arc<(K, V)>),
     SubTree(Arc<Node<K, V>>)
 }
 
@@ -44,7 +44,7 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Clone for NodeEntry<K, V> {
     fn clone(&self) -> NodeEntry<K, V> {
         match *self {
             Collision(ref items) => Collision(items.clone()),
-            SingleItem(ref k, ref v) => SingleItem(k.clone(), v.clone()),
+            SingleItem(ref kvp) => SingleItem(kvp.clone()),
             SubTree(ref sub) => SubTree(sub.clone()),
         }
     }
@@ -61,44 +61,52 @@ enum RemovalResult<K, V> {
     // Replace the sub-tree entry with another sub-tree entry pointing to the given node
     ReplaceSubTree(Arc<Node<K, V>>),
     // Collapse the sub-tree into a singe-item entry
-    CollapseSubTree(Arc<K>, Arc<V>),
+    CollapseSubTree(Arc<(K, V)>),
     // Completely remove the entry
     KillSubTree
 }
 
 impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
-    fn insert(&self, hash: u64, level: uint, key: Arc<K>, val: Arc<V>) -> Arc<Node<K, V>> {
-        assert!(level <= LAST_LEVEL);
+    fn insert(&self,
+              hash: u64,
+              level: uint,
+              new_kvp: Arc<(K, V)>,
+              insertion_count: &mut uint)
+           -> Arc<Node<K, V>> {
 
+        assert!(level <= LAST_LEVEL);
         let local_key = (hash & LEVEL_BIT_MASK) as uint;
 
         // See if the slot is free
         if (self.mask & (1 << local_key)) == 0 {
             // If yes, then fill it with a single-item entry
-            return self.copy_with_new_entry(local_key, SingleItem(key, val));
+            *insertion_count = 1;
+            return self.copy_with_new_entry(local_key, SingleItem(new_kvp));
         }
 
         let index = get_index(self.mask, local_key);
 
         match self.entries[index] {
-            SingleItem(ref existing_key, ref existing_val) => {
-                if *existing_key.get() == *key.get() {
+            SingleItem(ref existing_entry) => {
+                let existing_key = get_key(existing_entry);
+
+                if *existing_key == *get_key(&new_kvp) {
+                    *insertion_count = 0;
                     // Replace entry for the given key
-                    self.copy_with_new_entry(local_key, SingleItem(key, val))
+                    self.copy_with_new_entry(local_key, SingleItem(new_kvp))
                 } else if level != LAST_LEVEL {
+                    *insertion_count = 1;
                     // There already is an entry with different key but same hash value, so push
                     // everything down one level:
 
                     // 1. build the hashes for the level below
                     let new_hash = hash >> BITS_PER_LEVEL;
-                    let existing_hash = existing_key.get().hash() >> (BITS_PER_LEVEL * (level + 1));
+                    let existing_hash = existing_key.hash() >> (BITS_PER_LEVEL * (level + 1));
 
                     // 2. create the sub tree, containing the two items
-                    let new_sub_tree = Node::new_with_entries(key,
-                                                              val,
+                    let new_sub_tree = Node::new_with_entries(new_kvp,
                                                               new_hash,
-                                                              existing_key,
-                                                              existing_val,
+                                                              existing_entry,
                                                               existing_hash,
                                                               level + 1);
 
@@ -106,36 +114,42 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
                     // subtree entry
                     self.copy_with_new_entry(local_key, SubTree(new_sub_tree))
                 } else {
+                    *insertion_count = 1;
                     // If we have already exhausted all bits from the hash value, put everything in
                     // collision node
-                    let items = ~[(key, val), (existing_key.clone(), existing_val.clone())];
+                    let items = ~[new_kvp, existing_entry.clone()];
                     let collision_entry = Collision(Arc::new(items));
                     self.copy_with_new_entry(local_key, collision_entry)
                 }
             }
             Collision(ref items) => {
                 assert!(level == LAST_LEVEL);
-                let position = items.get().iter().position(|&(ref k, _)| *k.get() == *key.get());
+                let items = items.get();
+                let position = items.iter().position(|kvp2| *get_key(kvp2) == *get_key(&new_kvp));
 
                 let new_items = match position {
                     None => {
-                        let mut new_items = vec::with_capacity(items.get().len() + 1);
-                        new_items.push((key, val));
-                        new_items.push_all(items.get().as_slice());
+                        *insertion_count = 1;
+
+                        let mut new_items = vec::with_capacity(items.len() + 1);
+                        new_items.push(new_kvp);
+                        new_items.push_all(items.as_slice());
                         new_items
                     }
                     Some(position) => {
-                        let item_count = items.get().len();
+                        *insertion_count = 0;
+
+                        let item_count = items.len();
                         let mut new_items = vec::with_capacity(item_count);
 
                         if position > 0 {
-                            new_items.push_all(items.get().slice_to(position));
+                            new_items.push_all(items.slice_to(position));
                         }
 
-                        new_items.push((key, val));
+                        new_items.push(new_kvp);
 
                         if position < item_count - 1 {
-                           new_items.push_all(items.get().slice_from(position + 1));
+                           new_items.push_all(items.slice_from(position + 1));
                         }
 
                         assert!(new_items.len() == item_count);
@@ -148,40 +162,53 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
             SubTree(ref sub_tree) => {
                 let new_sub_tree = sub_tree.get().insert(hash >> BITS_PER_LEVEL,
                                                          level + 1,
-                                                         key,
-                                                         val);
+                                                         new_kvp,
+                                                         insertion_count);
 
                 self.copy_with_new_entry(local_key, SubTree(new_sub_tree))
             }
         }
     }
 
-    fn remove(&self, hash: u64, level: uint, key: &K) -> RemovalResult<K, V> {
+    fn remove(&self,
+              hash: u64,
+              level: uint,
+              key: &K,
+              removal_count: &mut uint)
+           -> RemovalResult<K, V> {
+
         assert!(level <= LAST_LEVEL);
         let local_key = (hash & LEVEL_BIT_MASK) as uint;
 
         if (self.mask & (1 << local_key)) == 0 {
+            *removal_count = 0;
             return NoChange;
         }
 
         let index = get_index(self.mask, local_key);
 
         match self.entries[index] {
-            SingleItem(ref existing_key, _) => {
-                if *existing_key.get() == *key {
+            SingleItem(ref existing_kvp) => {
+                if *get_key(existing_kvp) == *key {
+                    *removal_count = 1;
                     self.collapse_kill_or_change(local_key, index)
                 } else {
+                    *removal_count = 0;
                     NoChange
                 }
             }
             Collision(ref items) => {
                 assert!(level == LAST_LEVEL);
                 let items = items.get();
-                let position = items.iter().position(|&(ref k, _)| *k.get() == *key);
+                let position = items.iter().position(|kvp| *get_key(kvp) == *key);
 
                 match position {
-                    None => NoChange,
+                    None => {
+                        *removal_count = 0;
+                        NoChange
+                    },
                     Some(position) => {
+                        *removal_count = 1;
                         let item_count = items.len() - 1;
 
                         // The new entry can either still be a collision node, or it can be a simple
@@ -202,9 +229,9 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
                             assert!(items.len() == 2);
                             assert!(position == 0 || position == 1);
                             let index_of_remaining_item = 1 - position;
-                            let (k, v) = items[index_of_remaining_item].clone();
+                            let kvp = items[index_of_remaining_item].clone();
 
-                            SingleItem(k, v)
+                            SingleItem(kvp)
                         };
 
                         let new_sub_tree = self.copy_with_new_entry(local_key, new_entry);
@@ -213,18 +240,20 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
                 }
             }
             SubTree(ref sub_tree) => {
-                let result = sub_tree.get().remove(hash >> BITS_PER_LEVEL, level + 1, key);
-
+                let result = sub_tree.get().remove(hash >> BITS_PER_LEVEL,
+                                                   level + 1,
+                                                   key,
+                                                   removal_count);
                 match result {
                     NoChange => NoChange,
                     ReplaceSubTree(x) => {
                         ReplaceSubTree(self.copy_with_new_entry(local_key, SubTree(x)))
                     }
-                    CollapseSubTree(k, v) => {
+                    CollapseSubTree(kvp) => {
                         if bit_count(self.mask) == 1 {
-                            CollapseSubTree(k, v)
+                            CollapseSubTree(kvp)
                         } else {
-                            ReplaceSubTree(self.copy_with_new_entry(local_key, SingleItem(k, v)))
+                            ReplaceSubTree(self.copy_with_new_entry(local_key, SingleItem(kvp)))
                         }
                     },
                     KillSubTree => {
@@ -246,8 +275,8 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
             let other_index = 1 - entry_index;
 
             match self.entries[other_index] {
-                SingleItem(ref k, ref v) => {
-                    CollapseSubTree(k.clone(), v.clone())
+                SingleItem(ref kvp) => {
+                    CollapseSubTree(kvp.clone())
                 }
                 _ => ReplaceSubTree(self.copy_without_entry(local_key))
             }
@@ -327,11 +356,9 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
         });
     }
 
-    fn new_with_entries(new_key: Arc<K>,
-                        new_val: Arc<V>,
+    fn new_with_entries(new_kvp: Arc<(K,V)>,
                         new_hash: u64,
-                        existing_key: &Arc<K>,
-                        existing_val: &Arc<V>,
+                        existing_kvp: &Arc<(K, V)>,
                         existing_hash: u64,
                         level: uint)
                      -> Arc<Node<K, V>> {
@@ -343,11 +370,9 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
         if new_local_key != existing_local_key {
             let mask = (1 << new_local_key) | (1 << existing_local_key);
             let entries = if new_local_key < existing_local_key {
-                ~[SingleItem(new_key, new_val),
-                  SingleItem(existing_key.clone(), existing_val.clone())]
+                ~[SingleItem(new_kvp), SingleItem(existing_kvp.clone())]
             } else {
-                ~[SingleItem(existing_key.clone(), existing_val.clone()),
-                  SingleItem(new_key, new_val)]
+                ~[SingleItem(existing_kvp.clone()), SingleItem(new_kvp)]
             };
 
             Arc::new(Node {
@@ -357,16 +382,13 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
         } else if level == LAST_LEVEL {
             Arc::new(Node {
                 mask: 1 << new_local_key,
-                entries: ~[Collision(Arc::new(~[(new_key, new_val),
-                                                (existing_key.clone(), existing_val.clone())]))],
+                entries: ~[Collision(Arc::new(~[new_kvp, existing_kvp.clone()]))],
             })
         } else {
             // recurse further
-            let sub_tree = Node::new_with_entries(new_key,
-                                                  new_val,
+            let sub_tree = Node::new_with_entries(new_kvp,
                                                   new_hash >> BITS_PER_LEVEL,
-                                                  existing_key,
-                                                  existing_val,
+                                                  existing_kvp,
                                                   existing_hash >> BITS_PER_LEVEL,
                                                   level + 1);
             Arc::new(Node {
@@ -378,20 +400,21 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
 }
 
 struct HamtMap<K, V> {
-    priv root: Arc<Node<K, V>>
+    priv root: Arc<Node<K, V>>,
+    priv element_count: uint,
 }
 
 // Clone
 impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> Clone for HamtMap<K, V> {
     fn clone(&self) -> HamtMap<K, V> {
-        HamtMap { root: self.root.clone() }
+        HamtMap { root: self.root.clone(), element_count: self.element_count }
     }
 }
 
 // Container
 impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> Container for HamtMap<K, V> {
     fn len(&self) -> uint {
-        0
+        self.element_count
     }
 }
 
@@ -415,16 +438,16 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> Map<K, V> for HamtMap<K, V> {
             let index = get_index(current_node.get().mask, local_key);
 
             match current_node.get().entries[index] {
-                SingleItem(ref k, ref val) => return if *key == *(k.get()) {
-                    Some(val.get())
+                SingleItem(ref kvp) => return if *key == *get_key(kvp) {
+                    Some(kvp.get().second_ref())
                 } else {
                     None
                 },
                 Collision(ref items) => {
                     assert!(level == LAST_LEVEL);
-                    let found = items.get().iter().find(|ref kvp| *(kvp.first_ref().get()) == *key);
+                    let found = items.get().iter().find(|&kvp| *key == *get_key(kvp));
                     return match found {
-                        Some(&(_, ref val)) => Some(val.get()),
+                        Some(kvp) => Some(kvp.get().second_ref()),
                         None => None,
                     };
                 }
@@ -443,33 +466,55 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> PersistentMap<K, V> for HamtMap<K, 
 
     fn insert(&self, key: K, val: V) -> (HamtMap<K, V>, bool) {
         let hash = key.hash();
-        let new_root = self.root.get().insert(hash, 0, Arc::new(key), Arc::new(val));
-        (HamtMap { root: new_root }, false)
+        let mut new_entry_count = 0xdeadbeaf;
+        let new_root = self.root.get().insert(hash,
+                                              0,
+                                              Arc::new((key, val)),
+                                              &mut new_entry_count);
+        assert!(new_entry_count != 0xdeadbeaf);
+
+        (
+            HamtMap {
+                root: new_root,
+                element_count: self.element_count + new_entry_count
+            },
+            new_entry_count != 0
+        )
     }
 
     fn remove(&self, key: &K) -> (HamtMap<K, V>, bool) {
         let hash = key.hash();
-        let removal_result = self.root.get().remove(hash, 0, key);
+        let mut removal_count = 0xdeadbeaf;
+        let removal_result = self.root.get().remove(hash, 0, key, &mut removal_count);
+        assert!(removal_count != 0xdeadbeaf);
+        let new_element_count = self.element_count - removal_count;
 
         (match removal_result {
-            NoChange => HamtMap { root: self.root.clone() },
-            ReplaceSubTree(new_root) => HamtMap { root: new_root },
-            CollapseSubTree(k, v) => {
+            NoChange => HamtMap {
+                root: self.root.clone(),
+                element_count: new_element_count
+            },
+            ReplaceSubTree(new_root) => HamtMap {
+                root: new_root,
+                element_count: new_element_count
+            },
+            CollapseSubTree(kvp) => {
                 assert!(bit_count(self.root.get().mask) == 2);
-                let local_key = (k.get().hash() & LEVEL_BIT_MASK) as uint;
+                let local_key = (get_key(&kvp).hash() & LEVEL_BIT_MASK) as uint;
 
                 HamtMap {
                     root: Arc::new(Node {
                         mask: 1 << local_key,
-                        entries: ~[SingleItem(k, v)]
-                    })
+                        entries: ~[SingleItem(kvp)]
+                    }),
+                    element_count: new_element_count
                 }
             }
             KillSubTree => {
                 assert!(bit_count(self.root.get().mask) == 1);
                 HamtMap::new()
             }
-        }, false)
+        }, removal_count != 0)
     }
 }
 
@@ -480,7 +525,8 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> HamtMap<K, V> {
             root: Arc::new(Node {
                 mask: 0,
                 entries: ~[],
-            })
+            }),
+            element_count: 0
         }
     }
 }
@@ -494,6 +540,12 @@ fn get_index(mask: u32, index: uint) -> uint {
 
     bit_count(masked)
 }
+
+#[inline]
+fn get_key<'a, K: Hash+Eq+Send+Freeze, V: Send+Freeze>(arc: &'a Arc<(K,V)>) -> &'a K {
+    arc.get().first_ref()
+}
+
 
 #[inline]
 fn bit_count(x: u32) -> uint {
@@ -543,9 +595,9 @@ mod tests {
     fn test_insert() {
         let map00 = HamtMap::new();
 
-        let (map01, _) = map00.insert(1, 2);
-        let (map10, _) = map00.insert(2, 4);
-        let (map11, _) = map01.insert(2, 4);
+        let (map01, new_entry01) = map00.insert(1, 2);
+        let (map10, new_entry10) = map00.insert(2, 4);
+        let (map11, new_entry11) = map01.insert(2, 4);
 
         assert_find!(map00, 1, None);
         assert_find!(map00, 2, None);
@@ -558,17 +610,37 @@ mod tests {
 
         assert_find!(map10, 1, None);
         assert_find!(map10, 2, 4);
+
+        assert_eq!(new_entry01, true);
+        assert_eq!(new_entry10, true);
+        assert_eq!(new_entry11, true);
+
+        assert_eq!(map00.len(), 0);
+        assert_eq!(map01.len(), 1);
+        assert_eq!(map10.len(), 1);
+        assert_eq!(map11.len(), 2);
     }
 
     #[test]
     fn test_insert_overwrite() {
         let empty = HamtMap::new();
-        let (mapA, _) = empty.insert(1, 2);
-        let (mapB, _) = mapA.insert(1, 4);
+        let (mapA, new_entryA) = empty.insert(1, 2);
+        let (mapB, new_entryB) = mapA.insert(1, 4);
+        let (mapC, new_entryC) = mapB.insert(1, 6);
 
         assert_find!(empty, 1, None);
         assert_find!(mapA, 1, 2);
         assert_find!(mapB, 1, 4);
+        assert_find!(mapC, 1, 6);
+
+        assert_eq!(new_entryA, true);
+        assert_eq!(new_entryB, false);
+        assert_eq!(new_entryC, false);
+
+        assert_eq!(empty.len(), 0);
+        assert_eq!(mapA.len(), 1);
+        assert_eq!(mapB.len(), 1);
+        assert_eq!(mapC.len(), 1);
     }
 
     #[test]
@@ -592,6 +664,11 @@ mod tests {
 
         assert_find!(map10, 1, 2);
         assert_find!(map10, 2, None);
+
+        assert_eq!(map00.len(), 2);
+        assert_eq!(map01.len(), 1);
+        assert_eq!(map10.len(), 1);
+        assert_eq!(map11.len(), 0);
     }
 
     #[test]
@@ -599,7 +676,7 @@ mod tests {
         let mut values: HashSet<u64> = HashSet::new();
         let mut rng = rand::rng();
 
-        for _ in range(0, 10000) {
+        for _ in range(0, 1000000) {
             values.insert(rand::Rand::rand(&mut rng));
         }
 

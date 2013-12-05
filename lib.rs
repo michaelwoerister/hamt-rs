@@ -19,9 +19,7 @@ pub mod hamt;
 
 pub mod persistent {
 
-    pub trait PersistentMap<K: Hash+Eq+Send+Freeze,
-                        V: Send+Freeze>:
-        Map<K, V> + Clone {
+    pub trait PersistentMap<K: Hash+Eq+Send+Freeze, V: Send+Freeze>: Map<K, V> + Clone {
         /// Insert a key-value pair into the map. An existing value for a
         /// key is replaced by the new value. Return true if the key did
         /// not already exist in the map.
