@@ -22,8 +22,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-pub mod hamt {
-
 use std::cast;
 use std::vec;
 use std::unstable::intrinsics;
@@ -676,7 +674,7 @@ mod tests {
         let mut values: HashSet<u64> = HashSet::new();
         let mut rng = rand::rng();
 
-        for _ in range(0, 1000000) {
+        for _ in range(0, 20000) {
             values.insert(rand::Rand::rand(&mut rng));
         }
 
@@ -706,6 +704,4 @@ mod tests {
             }
         }
     }
-}
-
 }

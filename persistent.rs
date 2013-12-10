@@ -22,17 +22,13 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#[link(name = "persistent-datastructures",
-       package_id = "persistent-datastructures",
-       uuid = "ed131d50-5d95-11e3-949a-0800200c9a66")];
+pub trait PersistentMap<K: Hash+Eq+Send+Freeze, V: Send+Freeze>: Map<K, V> + Clone {
+    /// Insert a key-value pair into the map. An existing value for a
+    /// key is replaced by the new value. Return true if the key did
+    /// not already exist in the map.
+    fn insert(&self, key: K, value: V) -> (Self, bool);
 
-#[comment = "Persistent data structures for Rust"];
-#[license = "MIT"];
-#[crate_type = "rlib"];
-#[crate_type = "dylib"];
-
-#[feature(macro_rules)]; // Used for test cases
-
-extern mod extra;
-pub mod persistent;
-pub mod hamt;
+    /// Remove a key-value pair from the map. Return true if the key
+    /// was present in the map, otherwise false.
+    fn remove(&self, key: &K) -> (Self, bool);
+}
