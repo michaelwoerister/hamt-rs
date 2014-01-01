@@ -22,15 +22,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#[link(name = "persistent-datastructures",
-       package_id = "persistent-datastructures",
-       uuid = "ed131d50-5d95-11e3-949a-0800200c9a66")];
-
-#[comment = "Persistent data structures for Rust"];
-#[license = "MIT"];
-#[crate_type = "rlib"];
-#[crate_type = "dylib"];
-
 #[feature(macro_rules)]; // Used for test cases
 
 extern mod extra;
