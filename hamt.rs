@@ -553,29 +553,28 @@ fn bit_count(x: u32) -> uint {
 }
 
 
-// TESTS
-
-macro_rules! assert_find(
-    ($map:ident, $key:expr, None) => (
-        assert!($map.find(&$key).is_none());
-    );
-    ($map:ident, $key:expr, $val:expr) => (
-        match $map.find(&$key) {
-            Some(&value) => {
-                assert_eq!(value, $val);
-            }
-            _ => fail!()
-        };
-    );
-)
-
 #[cfg(test)]
 mod tests {
     use super::get_index;
     use super::HamtMap;
+    use persistent::PersistentMap;
     use std::hashmap::HashSet;
     use std::rand;
     use std::iter::range;
+
+    macro_rules! assert_find(
+        ($map:ident, $key:expr, None) => (
+            assert!($map.find(&$key).is_none());
+        );
+        ($map:ident, $key:expr, $val:expr) => (
+            match $map.find(&$key) {
+                Some(&value) => {
+                    assert_eq!(value, $val);
+                }
+                _ => fail!()
+            };
+        );
+    )
 
     #[test]
     fn test_get_index() {
