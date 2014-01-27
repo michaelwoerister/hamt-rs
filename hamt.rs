@@ -49,8 +49,8 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Clone for NodeEntry<K, V> {
 }
 
 struct Node<K, V> {
-    priv mask: u32,
-    priv entries: ~[NodeEntry<K, V>],
+    mask: u32,
+    entries: ~[NodeEntry<K, V>],
 }
 
 enum RemovalResult<K, V> {
@@ -398,8 +398,8 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze> Node<K, V> {
 }
 
 struct HamtMap<K, V> {
-    priv root: Arc<Node<K, V>>,
-    priv element_count: uint,
+    root: Arc<Node<K, V>>,
+    element_count: uint,
 }
 
 // Clone
