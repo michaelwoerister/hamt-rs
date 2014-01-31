@@ -205,6 +205,28 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze> NodeRef<K, V> {
         }
     }
 
+    // Does this tree contain a red child of red?
+    fn no_red_red(&self) -> bool {
+        assert!(self.col == Red || self.col == Black);
+        if !self.is_leaf() {
+            let (l, r) = self.children();
+            assert!(l.col == Red || l.col == Black);
+            assert!(r.col == Red || r.col == Black);
+
+            if self.col == Black {
+                return l.no_red_red() && r.no_red_red();
+            }
+
+            if self.col == Red && l.col == Black && r.col == Black {
+                return l.no_red_red() && r.no_red_red();
+            }
+
+            return false;
+        } else {
+            return true;
+        }
+    }
+
     // Is this tree black-balanced?
     fn black_balanced(&self) -> bool {
         self.count_black_height(std::num::max) == self.count_black_height(std::num::min)
@@ -220,192 +242,30 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze> NodeRef<K, V> {
             data.right.find_max_kvp()
         }
     }
-}
 
-// WAT!
-fn balance_node<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(parent: NodeRef<K, V>) -> NodeRef<K, V> {
-    assert!(!parent.is_leaf());
-
-    if parent.col == Black || parent.col == DoubleBlack {
-        let result_col = parent.col.dec();
-        let node_data = parent.get_data();
-        let (left_child, right_child) = parent.children();
-
-        if left_child.col == Red {
-            assert!(!left_child.is_leaf());
-            // (T! (or 'B 'BB) (R (R a xk xv b) yk yv c) zk zv d)
-            // (T! (or 'B 'BB) (R a xk xv (R b yk yv c)) zk zv d)
-            let (left_grand_child, right_grand_child) = left_child.children();
-
-            if left_grand_child.col == Red {
-                assert!(!left_grand_child.is_leaf());
-                // (T! (or 'B 'BB) (R (R a xk xv b) yk yv c) zk zv d)
-                let (a, b) = left_grand_child.children();
-                let xk = left_grand_child.get_data().key.clone();
-                let xv = left_grand_child.get_data().val.clone();
-                let yk = left_child.get_data().key.clone();
-                let yv = left_child.get_data().val.clone();
-                let c = right_grand_child;
-                let zk = node_data.key.clone();
-                let zv = node_data.val.clone();
-                let d = right_child;
-                return create_case1(result_col, a, b, c, d, xk, xv, yk, yv, zk, zv);
-            }
-
-            if right_grand_child.col == Red {
-                assert!(!right_grand_child.is_leaf());
-                // (T! (or 'B 'BB) (R a xk xv (R b yk yv c)) zk zv d)
-                let a = left_grand_child;
-                let xk = left_child.get_data().key.clone();
-                let xv = left_child.get_data().val.clone();
-                let (b, c) = right_grand_child.children();
-                let yk = right_grand_child.get_data().key.clone();
-                let yv = right_grand_child.get_data().val.clone();
-                let zk = node_data.key.clone();
-                let zv = node_data.val.clone();
-                let d = right_child;
-                return create_case1(result_col, a, b, c, d, xk, xv, yk, yv, zk, zv);
-            }
-        }
-
-        if right_child.col == Red {
-            assert!(!right_child.is_leaf());
-            // (T! (or 'B 'BB) a xk xv (R (R b yk yv c) zk zv d))
-            // (T! (or 'B 'BB) a xk xv (R b yk yv (R c zk zv d))))
-            let a = left_child;
-            let xk = node_data.key.clone();
-            let xv = node_data.val.clone();
-            let (left_grand_child, right_grand_child) = right_child.children();
-
-            if left_grand_child.col == Red {
-                assert!(!left_grand_child.is_leaf());
-                // (T! (or 'B 'BB) a xk xv (R (R b yk yv c) zk zv d))
-                let (b, c) = left_grand_child.children();
-                let yk = left_grand_child.get_data().key.clone();
-                let yv = left_grand_child.get_data().val.clone();
-                let zk = right_child.get_data().key.clone();
-                let zv = right_child.get_data().val.clone();
-                let d = right_grand_child;
-                return create_case1(result_col, a, b, c, d, xk, xv, yk, yv, zk, zv);
-            }
-
-            if right_grand_child.col == Red {
-                assert!(!right_grand_child.is_leaf());
-                // (T! (or 'B 'BB) a xk xv (R b yk yv (R c zk zv d))))
-                let b = left_grand_child;
-                let yk = right_child.get_data().key.clone();
-                let yv = right_child.get_data().val.clone();
-                let (c, d) = right_grand_child.children();
-                let zk = right_grand_child.get_data().key.clone();
-                let zv = right_grand_child.get_data().val.clone();
-                return create_case1(result_col, a, b, c, d, xk, xv, yk, yv, zk, zv);
-            }
-        }
+    fn modify_at(&self, key: K, val: V) -> NodeRef<K, V> {
+        //(blacken (internal-modify-at node key f)))
+        self.modify_at_rec(key, val).blacken()
     }
 
-    if parent.col == DoubleBlack {
-        // (BB a xk xv (-B (B b yk yv c) zk zv (and d (B))))
-        let (a, right_child) = parent.children();
-        let xk = parent.get_data().key.clone();
-        let xv = parent.get_data().val.clone();
-
-        if right_child.col == NegativeBlack {
-            assert!(!right_child.is_leaf());
-            let (left_grand_child, right_grand_child) = right_child.children();
-
-            if !left_grand_child.is_leaf() &&
-               left_grand_child.col == Black &&
-               right_grand_child.col == Black {
-                let (b, c) = left_grand_child.children();
-                let yk = left_grand_child.get_data().key.clone();
-                let yv = left_grand_child.get_data().val.clone();
-                let zk = right_child.get_data().key.clone();
-                let zv = right_child.get_data().val.clone();
-                let d = right_grand_child;
-
-                // (T cmp 'B (T cmp 'B a xk xv b) yk yv (balance cmp 'B c zk zv (redden d)))
-                return new_node(
-                    Black,
-                    new_node(Black, a, xk, xv, b),
-                    yk,
-                    yv,
-                    balance_node(new_node(Black, c, zk, zv, d.redden()))
-                );
-            }
-        }
-    }
-
-    if parent.col == DoubleBlack {
-        // (BB (-B (and a (B)) xk xv (B b yk yv c)) zk zv d)
-        let (left_child, d) = parent.children();
-
-        if left_child.col == NegativeBlack {
-            assert!(!left_child.is_leaf());
-            let (left_grand_child, right_grand_child) = left_child.children();
-
-            if left_grand_child.col == Black &&
-               !right_grand_child.is_leaf() &&
-               right_grand_child.col == Black {
-                let a = left_grand_child;
-                let xk = left_child.get_data().key.clone();
-                let xv = left_child.get_data().val.clone();
-                let (b, c) = right_grand_child.children();
-                let yk = right_grand_child.get_data().key.clone();
-                let yv = right_grand_child.get_data().val.clone();
-                let zk = parent.get_data().key.clone();
-                let zv = parent.get_data().val.clone();
-
-                // (T cmp 'B (balance cmp 'B (redden a) xk xv b) yk yv (T cmp 'B c zk zv d))]
-                return new_node(
-                    Black,
-                    balance_node(new_node(Black, a.redden(), xk, xv, b)),
-                    yk,
-                    yv,
-                    new_node(Black, c, zk, zv, d)
-                );
-            }
-        }
-    }
-
-    return parent;
-
-    fn create_case1<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>( color: Color,
-                                a: NodeRef<K, V>,
-                                b: NodeRef<K, V>,
-                                c: NodeRef<K, V>,
-                                d: NodeRef<K, V>,
-                                xk: K,
-                                xv: V,
-                                yk: K,
-                                yv: V,
-                                zk: K,
-                                zv: V)
-                             -> NodeRef<K, V> {
-        // (T cmp (black-1 (T-color node)) (T cmp 'B a xk xv b) yk yv (T cmp 'B c zk zv d))
-        return new_node(color, new_node(Black, a, xk, xv, b), yk, yv, new_node(Black, c, zk, zv, d));
-    }
-}
-
-fn modify_at<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(node: &NodeRef<K, V>, key: K, val: V) -> NodeRef<K, V> {
-
-    fn internal_modify_at<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(node: &NodeRef<K, V>, key: K, val: V) -> NodeRef<K, V> {
-        if node.is_leaf() {
-            assert!(node.col == Black);
+    fn modify_at_rec(&self, key: K, val: V) -> NodeRef<K, V> {
+        if self.is_leaf() {
+            assert!(self.col == Black);
             // (T cmp 'R node key (f key #f) node)]))
-            new_node(Red, (*node).clone(), key, val, (*node).clone())
+            new_node(Red, (*self).clone(), key, val, (*self).clone())
         } else {
             // matches: (T cmp c l k v r)
-            let k = node.get_data().key.clone();
-            let v = node.get_data().val.clone();
-            let c = node.col;
-            let (l, r) = node.children();
+            let k = self.get_data().key.clone();
+            let v = self.get_data().val.clone();
+            let c = self.col;
+            let (l, r) = self.children();
 
             if key < k {
                 // (balance cmp c (internal-modify-at l key f) k v r)
-                balance_node(new_node(c, internal_modify_at(&l, key, val), k, v, r))
+                new_node(c, l.modify_at_rec(key, val), k, v, r).balance()
             } else if key > k {
                 // (balance cmp c l k v (internal-modify-at r key f))])
-                balance_node(new_node(c, l, k, v, internal_modify_at(&r, key, val)))
+                new_node(c, l, k, v, r.modify_at_rec(key, val)).balance()
             } else {
                 // (T cmp c l k (f k v) r)
                 new_node(c, l, k, val, r)
@@ -413,159 +273,319 @@ fn modify_at<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(node: &NodeRef<K, V
         }
     }
 
-    //(blacken (internal-modify-at node key f)))
-    internal_modify_at(node, key, val).blacken()
-}
+    // WAT!
+    fn balance(self) -> NodeRef<K, V> {
+        assert!(!self.is_leaf());
 
-// ; Deletes a key from this map:
-fn delete<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(node: &NodeRef<K, V>, search_key: &K) -> NodeRef<K, V> {
-    // Finds the node to be removed:
-    fn del<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(node: NodeRef<K, V>, search_key: &K) -> NodeRef<K, V> {
-        if !node.is_leaf() {
-            let c = node.col;
-            let k = node.get_data().key.clone();
-            let v = node.get_data().val.clone();
-            let (l, r) = node.children();
+        if self.col == Black || self.col == DoubleBlack {
+            let result_col = self.col.dec();
+            let node_data = self.get_data();
+            let (left_child, right_child) = self.children();
 
-            if *search_key < k {
-                bubble(c, del(l, search_key), k, v, r)
-            } else if *search_key > k {
-                bubble(c, l, k, v, del(r, search_key))
-            } else {
-                remove(node)
+            if left_child.col == Red {
+                assert!(!left_child.is_leaf());
+                // (T! (or 'B 'BB) (R (R a xk xv b) yk yv c) zk zv d)
+                // (T! (or 'B 'BB) (R a xk xv (R b yk yv c)) zk zv d)
+                let (left_grand_child, right_grand_child) = left_child.children();
+
+                if left_grand_child.col == Red {
+                    assert!(!left_grand_child.is_leaf());
+                    // (T! (or 'B 'BB) (R (R a xk xv b) yk yv c) zk zv d)
+                    let (a, b) = left_grand_child.children();
+                    let xk = left_grand_child.get_data().key.clone();
+                    let xv = left_grand_child.get_data().val.clone();
+                    let yk = left_child.get_data().key.clone();
+                    let yv = left_child.get_data().val.clone();
+                    let c = right_grand_child;
+                    let zk = node_data.key.clone();
+                    let zv = node_data.val.clone();
+                    let d = right_child;
+                    return create_case1(result_col, a, b, c, d, xk, xv, yk, yv, zk, zv);
+                }
+
+                if right_grand_child.col == Red {
+                    assert!(!right_grand_child.is_leaf());
+                    // (T! (or 'B 'BB) (R a xk xv (R b yk yv c)) zk zv d)
+                    let a = left_grand_child;
+                    let xk = left_child.get_data().key.clone();
+                    let xv = left_child.get_data().val.clone();
+                    let (b, c) = right_grand_child.children();
+                    let yk = right_grand_child.get_data().key.clone();
+                    let yv = right_grand_child.get_data().val.clone();
+                    let zk = node_data.key.clone();
+                    let zv = node_data.val.clone();
+                    let d = right_child;
+                    return create_case1(result_col, a, b, c, d, xk, xv, yk, yv, zk, zv);
+                }
             }
-        } else {
-            node
+
+            if right_child.col == Red {
+                assert!(!right_child.is_leaf());
+                // (T! (or 'B 'BB) a xk xv (R (R b yk yv c) zk zv d))
+                // (T! (or 'B 'BB) a xk xv (R b yk yv (R c zk zv d))))
+                let a = left_child;
+                let xk = node_data.key.clone();
+                let xv = node_data.val.clone();
+                let (left_grand_child, right_grand_child) = right_child.children();
+
+                if left_grand_child.col == Red {
+                    assert!(!left_grand_child.is_leaf());
+                    // (T! (or 'B 'BB) a xk xv (R (R b yk yv c) zk zv d))
+                    let (b, c) = left_grand_child.children();
+                    let yk = left_grand_child.get_data().key.clone();
+                    let yv = left_grand_child.get_data().val.clone();
+                    let zk = right_child.get_data().key.clone();
+                    let zv = right_child.get_data().val.clone();
+                    let d = right_grand_child;
+                    return create_case1(result_col, a, b, c, d, xk, xv, yk, yv, zk, zv);
+                }
+
+                if right_grand_child.col == Red {
+                    assert!(!right_grand_child.is_leaf());
+                    // (T! (or 'B 'BB) a xk xv (R b yk yv (R c zk zv d))))
+                    let b = left_grand_child;
+                    let yk = right_child.get_data().key.clone();
+                    let yv = right_child.get_data().val.clone();
+                    let (c, d) = right_grand_child.children();
+                    let zk = right_grand_child.get_data().key.clone();
+                    let zv = right_grand_child.get_data().val.clone();
+                    return create_case1(result_col, a, b, c, d, xk, xv, yk, yv, zk, zv);
+                }
+            }
+        }
+
+        if self.col == DoubleBlack {
+            // (BB a xk xv (-B (B b yk yv c) zk zv (and d (B))))
+            let (a, right_child) = self.children();
+            let xk = self.get_data().key.clone();
+            let xv = self.get_data().val.clone();
+
+            if right_child.col == NegativeBlack {
+                assert!(!right_child.is_leaf());
+                let (left_grand_child, right_grand_child) = right_child.children();
+
+                if !left_grand_child.is_leaf() &&
+                   left_grand_child.col == Black &&
+                   right_grand_child.col == Black {
+                    let (b, c) = left_grand_child.children();
+                    let yk = left_grand_child.get_data().key.clone();
+                    let yv = left_grand_child.get_data().val.clone();
+                    let zk = right_child.get_data().key.clone();
+                    let zv = right_child.get_data().val.clone();
+                    let d = right_grand_child;
+
+                    // (T cmp 'B (T cmp 'B a xk xv b) yk yv (balance cmp 'B c zk zv (redden d)))
+                    return new_node(
+                        Black,
+                        new_node(Black, a, xk, xv, b),
+                        yk,
+                        yv,
+                        new_node(Black, c, zk, zv, d.redden()).balance()
+                    );
+                }
+            }
+        }
+
+        if self.col == DoubleBlack {
+            // (BB (-B (and a (B)) xk xv (B b yk yv c)) zk zv d)
+            let (left_child, d) = self.children();
+
+            if left_child.col == NegativeBlack {
+                assert!(!left_child.is_leaf());
+                let (left_grand_child, right_grand_child) = left_child.children();
+
+                if left_grand_child.col == Black &&
+                   !right_grand_child.is_leaf() &&
+                   right_grand_child.col == Black {
+                    let a = left_grand_child;
+                    let xk = left_child.get_data().key.clone();
+                    let xv = left_child.get_data().val.clone();
+                    let (b, c) = right_grand_child.children();
+                    let yk = right_grand_child.get_data().key.clone();
+                    let yv = right_grand_child.get_data().val.clone();
+                    let zk = self.get_data().key.clone();
+                    let zv = self.get_data().val.clone();
+
+                    // (T cmp 'B (balance cmp 'B (redden a) xk xv b) yk yv (T cmp 'B c zk zv d))]
+                    return new_node(
+                        Black,
+                        new_node(Black, a.redden(), xk, xv, b).balance(),
+                        yk,
+                        yv,
+                        new_node(Black, c, zk, zv, d)
+                    );
+                }
+            }
+        }
+
+        return self;
+
+        fn create_case1<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(
+            color: Color,
+            a: NodeRef<K, V>,
+            b: NodeRef<K, V>,
+            c: NodeRef<K, V>,
+            d: NodeRef<K, V>,
+            xk: K,
+            xv: V,
+            yk: K,
+            yv: V,
+            zk: K,
+            zv: V)
+         -> NodeRef<K, V> {
+            // (T cmp (black-1 (T-color node)) (T cmp 'B a xk xv b) yk yv (T cmp 'B c zk zv d))
+            return new_node(color, new_node(Black, a, xk, xv, b), yk, yv, new_node(Black, c, zk, zv, d));
         }
     }
 
-    // Removes this node; it might
-    // leave behind a double-black node:
-    fn remove<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(node: NodeRef<K, V>) -> NodeRef<K, V> {
-        assert!(!node.is_leaf());
-        // Leaves are easiest to kill:
-        let (left, right) = node.children();
-        if left.is_leaf() && right.is_leaf() {
-            return if node.col == Red {
-                new_leaf(Black)
+    // ; Deletes a key from this map:
+    fn delete(&self, search_key: &K) -> NodeRef<K, V> {
+        // Finds the node to be removed:
+        fn del<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(node: NodeRef<K, V>, search_key: &K) -> NodeRef<K, V> {
+            if !node.is_leaf() {
+                let c = node.col;
+                let k = node.get_data().key.clone();
+                let v = node.get_data().val.clone();
+                let (l, r) = node.children();
+
+                if *search_key < k {
+                    bubble(c, del(l, search_key), k, v, r)
+                } else if *search_key > k {
+                    bubble(c, l, k, v, del(r, search_key))
+                } else {
+                    remove(node)
+                }
             } else {
-                assert!(node.col == Black);
-                new_leaf(DoubleBlack)
-            };
+                node
+            }
         }
 
-        // Killing a node with one child;
-        // parent or child is red:
-        //    [(or (R child (L!))
-        //         (R (L!) child))
-        // ; =>
-        // child]
-        if node.col == Red {
+        // Removes this node; it might
+        // leave behind a double-black node:
+        fn remove<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(node: NodeRef<K, V>) -> NodeRef<K, V> {
+            assert!(!node.is_leaf());
+            // Leaves are easiest to kill:
+            let (left, right) = node.children();
+            if left.is_leaf() && right.is_leaf() {
+                return if node.col == Red {
+                    new_leaf(Black)
+                } else {
+                    assert!(node.col == Black);
+                    new_leaf(DoubleBlack)
+                };
+            }
+
+            // Killing a node with one child;
+            // parent or child is red:
+            //    [(or (R child (L!))
+            //         (R (L!) child))
+            // ; =>
+            // child]
+            if node.col == Red {
+                if right.is_leaf() {
+                    return left;
+                }
+
+                if left.is_leaf() {
+                    return right;
+                }
+            }
+
+            if node.col == Black {
+                // [(or (B (R l k v r) (L!))
+                if left.col == Red && right.is_leaf() {
+                    let data = left.get_data();
+                    // (T cmp 'B l k v r)]
+                    return new_node(Black, data.left.clone(), data.key.clone(), data.val.clone(), data.right.clone());
+                }
+
+                //      (B (L!) (R l k v r)))
+                if left.is_leaf() && right.col == Red {
+                    let data = right.get_data();
+                    // (T cmp 'B l k v r)]
+                    return new_node(Black, data.left.clone(), data.key.clone(), data.val.clone(), data.right.clone());
+                }
+
+                // Killing a black node with one black child:
+                // [(or (B (L!) (and child (B)))
+                //      (B (and child (B)) (L!)))
+                if left.is_leaf() && right.col == Black {
+                    // (black+1 child)
+                    let child = right.clone().inc();
+                    return child;
+                }
+
+                if left.col == Black && right.is_leaf() {
+                    // (black+1 child)
+                    let child = left.clone().inc();
+                    return child;
+                }
+            }
+
+            if !left.is_leaf() && !right.is_leaf() {
+                // ((cons k v) (sorted-map-max l))
+                let (k, v) = left.find_max_kvp();
+                // (l*         (remove-max l))
+                let new_left = remove_max(left);
+                // (bubble c l* k v r)
+                return bubble(node.col, new_left, k, v, right);
+            }
+
+            unreachable!();
+        }
+
+        // Kills a double-black, or moves it to the top:
+        // (define (bubble c l k v r)
+        fn bubble<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(color: Color, l: NodeRef<K, V>, k: K, v: V, r: NodeRef<K, V>) -> NodeRef<K, V> {
+            if l.col == DoubleBlack || r.col == DoubleBlack {
+                // (or (double-black? l) (double-black? r))
+                // (balance cmp (black+1 c) (black-1 l) k v (black-1 r))
+                new_node(color.inc(), l.dec(), k, v, r.dec()).balance()
+            } else {
+                // [else (T cmp c l k v r)]
+                new_node(color, l, k, v, r)
+            }
+        }
+
+        // Removes the max node:
+        fn remove_max<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(node: NodeRef<K, V>) -> NodeRef<K, V> {
+            assert!(!node.is_leaf());
+            let (left, key, right) = node.children_and_key();
             if right.is_leaf() {
-                return left;
-            }
-
-            if left.is_leaf() {
-                return right;
-            }
-        }
-
-        if node.col == Black {
-            // [(or (B (R l k v r) (L!))
-            if left.col == Red && right.is_leaf() {
-                let data = left.get_data();
-                // (T cmp 'B l k v r)]
-                return new_node(Black, data.left.clone(), data.key.clone(), data.val.clone(), data.right.clone());
-            }
-
-            //      (B (L!) (R l k v r)))
-            if left.is_leaf() && right.col == Red {
-                let data = right.get_data();
-                // (T cmp 'B l k v r)]
-                return new_node(Black, data.left.clone(), data.key.clone(), data.val.clone(), data.right.clone());
-            }
-
-            // Killing a black node with one black child:
-            // [(or (B (L!) (and child (B)))
-            //      (B (and child (B)) (L!)))
-            if left.is_leaf() && right.col == Black {
-                // (black+1 child)
-                let child = right.clone().inc();
-                return child;
-            }
-
-            if left.col == Black && right.is_leaf() {
-                // (black+1 child)
-                let child = left.clone().inc();
-                return child;
+                // [(T!   l     (L!))  (remove node)]
+                remove(node)
+            } else {
+                //[(T! c l k v r   )  (bubble c l k v (remove-max r))])
+                bubble(node.col, left, key.clone(), node.get_data().val.clone(), remove_max(right))
             }
         }
 
-        if !left.is_leaf() && !right.is_leaf() {
-            // ((cons k v) (sorted-map-max l))
-            let (k, v) = left.find_max_kvp();
-            // (l*         (remove-max l))
-            let new_left = remove_max(left);
-            // (bubble c l* k v r)
-            return bubble(node.col, new_left, k, v, right);
-        }
-
-        unreachable!();
+        // Delete the key, and color the new root black:
+        // (blacken (del node)))
+        del(self.clone(), search_key).blacken()
     }
-
-    // Kills a double-black, or moves it to the top:
-    // (define (bubble c l k v r)
-    fn bubble<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(color: Color, l: NodeRef<K, V>, k: K, v: V, r: NodeRef<K, V>) -> NodeRef<K, V> {
-        if l.col == DoubleBlack || r.col == DoubleBlack {
-            // (or (double-black? l) (double-black? r))
-            // (balance cmp (black+1 c) (black-1 l) k v (black-1 r))
-            balance_node(new_node(color.inc(), l.dec(), k, v, r.dec()))
-        } else {
-            // [else (T cmp c l k v r)]
-            new_node(color, l, k, v, r)
-        }
-    }
-
-    // Removes the max node:
-    fn remove_max<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(node: NodeRef<K, V>) -> NodeRef<K, V> {
-        assert!(!node.is_leaf());
-        let (left, key, right) = node.children_and_key();
-        if right.is_leaf() {
-            // [(T!   l     (L!))  (remove node)]
-            remove(node)
-        } else {
-            //[(T! c l k v r   )  (bubble c l k v (remove-max r))])
-            bubble(node.col, left, key.clone(), node.get_data().val.clone(), remove_max(right))
-        }
-    }
-
-    // Delete the key, and color the new root black:
-    // (blacken (del node)))
-    del(node.clone(), search_key).blacken()
 }
-
-
 
 #[deriving(Clone)]
-struct PersistentRBT<K, V> {
+struct RedBlackTree<K, V> {
     root: NodeRef<K, V>
 }
 
-impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze> PersistentRBT<K, V> {
-    pub fn new() -> PersistentRBT<K, V> {
-        PersistentRBT { root: new_leaf(Black) }
+impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze> RedBlackTree<K, V> {
+    pub fn new() -> RedBlackTree<K, V> {
+        RedBlackTree { root: new_leaf(Black) }
     }
 
     pub fn find<'a>(&'a self, search_key: &K) -> Option<&'a V> {
         self.root.find(search_key)
     }
 
-    pub fn insert(self, key: K, value: V) -> (PersistentRBT<K, V>, bool) {
-        (PersistentRBT { root: modify_at(&self.root, key, value) }, false)
+    pub fn insert(self, key: K, value: V) -> (RedBlackTree<K, V>, bool) {
+        (RedBlackTree { root: self.root.modify_at(key, value) }, false)
     }
 
-    pub fn remove(self, key: &K) -> (PersistentRBT<K, V>, bool) {
-        (PersistentRBT { root: delete(&self.root, key) }, false)
+    pub fn remove(self, key: &K) -> (RedBlackTree<K, V>, bool) {
+        (RedBlackTree { root: self.root.delete(key) }, false)
     }
 
     fn balanced(&self) -> bool {
@@ -573,32 +593,12 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze> PersistentRBT<K, V> {
     }
 
     fn no_red_red(&self) -> bool {
-        no_red_red(&self.root)
+        self.root.no_red_red()
     }
 }
 
 
-// Does this tree contain a red child of red?
-fn no_red_red<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(node: &NodeRef<K, V>) -> bool {
-    assert!(node.col == Red || node.col == Black);
-    if !node.is_leaf() {
-        let (l, r) = node.children();
-        assert!(l.col == Red || l.col == Black);
-        assert!(r.col == Red || r.col == Black);
 
-        if node.col == Black {
-            return no_red_red(&l) && no_red_red(&r);
-        }
-
-        if node.col == Red && l.col == Black && r.col == Black {
-            return no_red_red(&l) && no_red_red(&r);
-        }
-
-        return false;
-    } else {
-        return true;
-    }
-}
 
 macro_rules! assert_find(
         ($map:ident, $key:expr, None) => (
@@ -616,7 +616,7 @@ macro_rules! assert_find(
 
 #[test]
 fn test_insert() {
-    let map00 = PersistentRBT::new();
+    let map00 = RedBlackTree::new();
 
     let (map01, _new_entry01) = map00.clone().insert(1, 2);
     let (map10, _new_entry10) = map00.clone().insert(2, 4);
@@ -655,7 +655,7 @@ fn test_insert() {
 
 #[test]
 fn test_insert_overwrite() {
-    let empty = PersistentRBT::new();
+    let empty = RedBlackTree::new();
     let (mapA, _new_entryA) = empty.clone().insert(1, 2);
     let (mapB, _new_entryB) = mapA.clone().insert(1, 4);
     let (mapC, _new_entryC) = mapB.clone().insert(1, 6);
@@ -686,7 +686,7 @@ fn test_insert_overwrite() {
 
 #[test]
 fn test_remove() {
-    let (map00, _) = (PersistentRBT::new()
+    let (map00, _) = (RedBlackTree::new()
         .insert(1, 2)).first()
         .insert(2, 4);
 
@@ -733,7 +733,7 @@ fn test_random() {
         values.insert(rand::Rand::rand(&mut rng));
     }
 
-    let mut map = PersistentRBT::new();
+    let mut map = RedBlackTree::new();
 
     for &x in values.iter() {
         let (map1, _) = map.insert(x, x);
@@ -766,7 +766,7 @@ fn test_random() {
 
 #[test]
 fn test_insert_ascending() {
-    let mut map = PersistentRBT::new();
+    let mut map = RedBlackTree::new();
     for x in range(0, 1000) {
         let (map1, _) = map.insert(x, x);
         assert!(map1.balanced());
@@ -778,7 +778,7 @@ fn test_insert_ascending() {
 #[test]
 fn test_insert_descending() {
     let data = range(0, 1000).to_owned_vec();
-    let mut map = PersistentRBT::new();
+    let mut map = RedBlackTree::new();
     for &x in data.rev_iter() {
         let (map1, _) = map.insert(x, x);
         assert!(map1.balanced());
@@ -790,7 +790,7 @@ fn test_insert_descending() {
 #[test]
 fn test_insert_descending_overwriting() {
     let data = range(0, 1000).to_owned_vec();
-    let mut map = PersistentRBT::new();
+    let mut map = RedBlackTree::new();
     for &x in data.rev_iter() {
         let (map1, _) = map.insert(x, x);
         assert!(map1.balanced());
@@ -808,7 +808,7 @@ fn test_insert_descending_overwriting() {
 
 #[test]
 fn test_insert_ascending_overwriting() {
-    let mut map = PersistentRBT::new();
+    let mut map = RedBlackTree::new();
     for x in range(0, 1000) {
         let (map1, _) = map.insert(x, x);
         assert!(map1.balanced());
@@ -826,7 +826,7 @@ fn test_insert_ascending_overwriting() {
 
 #[test]
 fn test_insert_arrg() {
-    let map0 = PersistentRBT::new();
+    let map0 = RedBlackTree::new();
     let (map1, _) = map0.clone().insert(-2355952011642934374, -2355952011642934374);
     let (map2, _) = map1.clone().insert(166785517347840485, 166785517347840485);
     let (map3, _) = map2.clone().insert(-6442202968218938924, -6442202968218938924);
@@ -857,7 +857,7 @@ pub fn create_uuids(bh: &mut BenchHarness) {
     }
 
     bh.iter(|| {
-        let mut map = PersistentRBT::new();
+        let mut map = RedBlackTree::new();
 
         for &x in values.iter() {
             let (map1, _) = map.insert(x, x);
