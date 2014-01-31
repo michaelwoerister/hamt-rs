@@ -462,7 +462,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> Map<K, V> for HamtMap<K, V> {
 
 impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> PersistentMap<K, V> for HamtMap<K, V> {
 
-    fn insert(&self, key: K, val: V) -> (HamtMap<K, V>, bool) {
+    fn insert(self, key: K, val: V) -> (HamtMap<K, V>, bool) {
         let hash = key.hash();
         let mut new_entry_count = 0xdeadbeaf;
         let new_root = self.root.get().insert(hash,
@@ -480,7 +480,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze> PersistentMap<K, V> for HamtMap<K, 
         )
     }
 
-    fn remove(&self, key: &K) -> (HamtMap<K, V>, bool) {
+    fn remove(self, key: &K) -> (HamtMap<K, V>, bool) {
         let hash = key.hash();
         let mut removal_count = 0xdeadbeaf;
         let removal_result = self.root.get().remove(hash, 0, key, &mut removal_count);
@@ -561,6 +561,7 @@ mod tests {
     use std::hashmap::HashSet;
     use std::rand;
     use std::iter::range;
+    use extra::test::BenchHarness;
 
     macro_rules! assert_find(
         ($map:ident, $key:expr, None) => (
@@ -592,9 +593,9 @@ mod tests {
     fn test_insert() {
         let map00 = HamtMap::new();
 
-        let (map01, new_entry01) = map00.insert(1, 2);
-        let (map10, new_entry10) = map00.insert(2, 4);
-        let (map11, new_entry11) = map01.insert(2, 4);
+        let (map01, new_entry01) = map00.clone().insert(1, 2);
+        let (map10, new_entry10) = map00.clone().insert(2, 4);
+        let (map11, new_entry11) = map01.clone().insert(2, 4);
 
         assert_find!(map00, 1, None);
         assert_find!(map00, 2, None);
@@ -621,9 +622,9 @@ mod tests {
     #[test]
     fn test_insert_overwrite() {
         let empty = HamtMap::new();
-        let (mapA, new_entryA) = empty.insert(1, 2);
-        let (mapB, new_entryB) = mapA.insert(1, 4);
-        let (mapC, new_entryC) = mapB.insert(1, 6);
+        let (mapA, new_entryA) = empty.clone().insert(1, 2);
+        let (mapB, new_entryB) = mapA.clone().insert(1, 4);
+        let (mapC, new_entryC) = mapB.clone().insert(1, 6);
 
         assert_find!(empty, 1, None);
         assert_find!(mapA, 1, 2);
@@ -646,9 +647,9 @@ mod tests {
             .insert(1, 2)).first()
             .insert(2, 4);
 
-        let (map01, _) = map00.remove(&1);
-        let (map10, _) = map00.remove(&2);
-        let (map11, _) = map01.remove(&2);
+        let (map01, _) = map00.clone().remove(&1);
+        let (map10, _) = map00.clone().remove(&2);
+        let (map11, _) = map01.clone().remove(&2);
 
         assert_find!(map00, 1, 2);
         assert_find!(map00, 2, 4);
