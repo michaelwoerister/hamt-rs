@@ -4,6 +4,7 @@ use std::hashmap::HashSet;
 use std::rand;
 use std::iter::range;
 use extra::test::BenchHarness;
+use std::hashmap::HashMap;
 
 macro_rules! assert_find(
     ($map:ident, $key:expr, None) => (
@@ -165,4 +166,40 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
             }
         })
     }
+}
+
+fn bench_find_hashmap(count: uint, bh: &mut BenchHarness) {
+    let mut rng = rand::rng();
+    let values = ::std::vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
+    let mut map = HashMap::<u64, u64>::new();
+
+    for &x in values.iter() {
+        map.insert(x, x);
+    }
+
+    bh.iter(|| {
+        for x in values.rev_iter() {
+            let _ = map.find(x);
+        }
+    })
+}
+
+#[bench]
+fn std_hashmap_find_10(bh: &mut BenchHarness) {
+    bench_find_hashmap(10, bh);
+}
+
+#[bench]
+fn std_hashmap_find_100(bh: &mut BenchHarness) {
+    bench_find_hashmap(100, bh);
+}
+
+#[bench]
+fn std_hashmap_find_1000(bh: &mut BenchHarness) {
+    bench_find_hashmap(1000, bh);
+}
+
+#[bench]
+fn std_hashmap_find_50000(bh: &mut BenchHarness) {
+    bench_find_hashmap(50000, bh);
 }

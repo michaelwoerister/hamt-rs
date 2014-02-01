@@ -22,13 +22,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-pub trait PersistentMap<K: Hash+Eq+Send+Freeze, V: Send+Freeze>: Map<K, V> + Clone {
+pub trait PersistentMap<K: Send+Freeze, V: Send+Freeze>: Map<K, V> + Clone {
     /// Insert a key-value pair into the map. An existing value for a
-    /// key is replaced by the new value. Return true if the key did
-    /// not already exist in the map.
+    /// key is replaced by the new value. Return true if the maps element count changed.
     fn insert(self, key: K, value: V) -> (Self, bool);
 
-    /// Remove a key-value pair from the map. Return true if the key
-    /// was present in the map, otherwise false.
+    /// Remove a key-value pair from the map. Return true if the maps element count changed.
     fn remove(self, key: &K) -> (Self, bool);
 }

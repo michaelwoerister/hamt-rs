@@ -17,12 +17,8 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
-#[feature(macro_rules)];
-
-extern mod extra;
-
 use extra::arc::Arc;
-use extra::test::BenchHarness;
+use persistent::PersistentMap;
 
 #[deriving(Clone, Eq)]
 enum Color {
@@ -229,7 +225,7 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze> NodeRef<K, V> {
 
     // Is this tree black-balanced?
     fn black_balanced(&self) -> bool {
-        self.count_black_height(std::num::max) == self.count_black_height(std::num::min)
+        self.count_black_height(::std::num::max) == self.count_black_height(::std::num::min)
     }
 
     // Returns the maxium (key . value) pair:
@@ -243,14 +239,15 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze> NodeRef<K, V> {
         }
     }
 
-    fn modify_at(&self, key: K, val: V) -> NodeRef<K, V> {
+    fn modify_at(&self, key: K, val: V, insertion_count: &mut uint) -> NodeRef<K, V> {
         //(blacken (internal-modify-at node key f)))
-        self.modify_at_rec(key, val).blacken()
+        self.modify_at_rec(key, val, insertion_count).blacken()
     }
 
-    fn modify_at_rec(&self, key: K, val: V) -> NodeRef<K, V> {
+    fn modify_at_rec(&self, key: K, val: V, insertion_count: &mut uint) -> NodeRef<K, V> {
         if self.is_leaf() {
             assert!(self.col == Black);
+            *insertion_count = 1;
             // (T cmp 'R node key (f key #f) node)]))
             new_node(Red, (*self).clone(), key, val, (*self).clone())
         } else {
@@ -262,11 +259,12 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze> NodeRef<K, V> {
 
             if key < k {
                 // (balance cmp c (internal-modify-at l key f) k v r)
-                new_node(c, l.modify_at_rec(key, val), k, v, r).balance()
+                new_node(c, l.modify_at_rec(key, val, insertion_count), k, v, r).balance()
             } else if key > k {
                 // (balance cmp c l k v (internal-modify-at r key f))])
-                new_node(c, l, k, v, r.modify_at_rec(key, val)).balance()
+                new_node(c, l, k, v, r.modify_at_rec(key, val, insertion_count)).balance()
             } else {
+                *insertion_count = 0;
                 // (T cmp c l k (f k v) r)
                 new_node(c, l, k, val, r)
             }
@@ -439,9 +437,13 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze> NodeRef<K, V> {
     }
 
     // ; Deletes a key from this map:
-    fn delete(&self, search_key: &K) -> NodeRef<K, V> {
+    fn delete(&self, search_key: &K, removal_count: &mut uint) -> NodeRef<K, V> {
         // Finds the node to be removed:
-        fn del<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(node: NodeRef<K, V>, search_key: &K) -> NodeRef<K, V> {
+        fn del<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze>(
+            node: NodeRef<K, V>,
+            search_key: &K,
+            removal_count: &mut uint)
+         -> NodeRef<K, V> {
             if !node.is_leaf() {
                 let c = node.col;
                 let k = node.get_data().key.clone();
@@ -449,13 +451,15 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze> NodeRef<K, V> {
                 let (l, r) = node.children();
 
                 if *search_key < k {
-                    bubble(c, del(l, search_key), k, v, r)
+                    bubble(c, del(l, search_key, removal_count), k, v, r)
                 } else if *search_key > k {
-                    bubble(c, l, k, v, del(r, search_key))
+                    bubble(c, l, k, v, del(r, search_key, removal_count))
                 } else {
+                    *removal_count = 1;
                     remove(node)
                 }
             } else {
+                *removal_count = 0;
                 node
             }
         }
@@ -562,18 +566,22 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze> NodeRef<K, V> {
 
         // Delete the key, and color the new root black:
         // (blacken (del node)))
-        del(self.clone(), search_key).blacken()
+        del(self.clone(), search_key, removal_count).blacken()
     }
 }
 
 #[deriving(Clone)]
 struct RedBlackTree<K, V> {
-    root: NodeRef<K, V>
+    root: NodeRef<K, V>,
+    len: uint,
 }
 
 impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze> RedBlackTree<K, V> {
     pub fn new() -> RedBlackTree<K, V> {
-        RedBlackTree { root: new_leaf(Black) }
+        RedBlackTree {
+            root: new_leaf(Black),
+            len: 0,
+        }
     }
 
     pub fn find<'a>(&'a self, search_key: &K) -> Option<&'a V> {
@@ -581,11 +589,21 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze> RedBlackTree<K, V> {
     }
 
     pub fn insert(self, key: K, value: V) -> (RedBlackTree<K, V>, bool) {
-        (RedBlackTree { root: self.root.modify_at(key, value) }, false)
+        let mut insertion_count = 0xdeadbeaf;
+        let new_root = self.root.modify_at(key, value, &mut insertion_count);
+        assert!(insertion_count != 0xdeadbeaf);
+        (RedBlackTree { root: new_root, len: self.len + insertion_count }, insertion_count != 0)
     }
 
     pub fn remove(self, key: &K) -> (RedBlackTree<K, V>, bool) {
-        (RedBlackTree { root: self.root.delete(key) }, false)
+        let mut removal_count = 0xdeadbeaf;
+        let new_root = self.root.delete(key, &mut removal_count);
+        assert!(removal_count != 0xdeadbeaf);
+        (RedBlackTree { root: new_root, len: self.len - removal_count }, removal_count != 0)
+    }
+
+    pub fn len(&self) -> uint {
+        self.len
     }
 
     fn balanced(&self) -> bool {
@@ -597,290 +615,87 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze> RedBlackTree<K, V> {
     }
 }
 
-
-
-
-macro_rules! assert_find(
-        ($map:ident, $key:expr, None) => (
-            assert!($map.find(&$key).is_none());
-        );
-        ($map:ident, $key:expr, $val:expr) => (
-            match $map.find(&$key) {
-                Some(&value) => {
-                    assert_eq!(value, $val);
-                }
-                _ => fail!()
-            };
-        );
-    )
-
-#[test]
-fn test_insert() {
-    let map00 = RedBlackTree::new();
-
-    let (map01, _new_entry01) = map00.clone().insert(1, 2);
-    let (map10, _new_entry10) = map00.clone().insert(2, 4);
-    let (map11, _new_entry11) = map01.clone().insert(2, 4);
-
-    assert_find!(map00, 1, None);
-    assert_find!(map00, 2, None);
-
-    assert_find!(map01, 1, 2);
-    assert_find!(map01, 2, None);
-
-    assert_find!(map11, 1, 2);
-    assert_find!(map11, 2, 4);
-
-    assert_find!(map10, 1, None);
-    assert_find!(map10, 2, 4);
-
-    assert!(map00.balanced());
-    assert!(map00.no_red_red());
-    assert!(map01.balanced());
-    assert!(map01.no_red_red());
-    assert!(map10.balanced());
-    assert!(map10.no_red_red());
-    assert!(map11.balanced());
-    assert!(map11.no_red_red());
-
-    // assert_eq!(new_entry01, true);
-    // assert_eq!(new_entry10, true);
-    // assert_eq!(new_entry11, true);
-
-    // assert_eq!(map00.len(), 0);
-    // assert_eq!(map01.len(), 1);
-    // assert_eq!(map10.len(), 1);
-    // assert_eq!(map11.len(), 2);
-}
-
-#[test]
-fn test_insert_overwrite() {
-    let empty = RedBlackTree::new();
-    let (mapA, _new_entryA) = empty.clone().insert(1, 2);
-    let (mapB, _new_entryB) = mapA.clone().insert(1, 4);
-    let (mapC, _new_entryC) = mapB.clone().insert(1, 6);
-
-    assert_find!(empty, 1, None);
-    assert_find!(mapA, 1, 2);
-    assert_find!(mapB, 1, 4);
-    assert_find!(mapC, 1, 6);
-
-    assert!(empty.balanced());
-    assert!(empty.no_red_red());
-    assert!(mapA.balanced());
-    assert!(mapA.no_red_red());
-    assert!(mapB.balanced());
-    assert!(mapB.no_red_red());
-    assert!(mapC.balanced());
-    assert!(mapC.no_red_red());
-
-    // assert_eq!(new_entryA, true);
-    // assert_eq!(new_entryB, false);
-    // assert_eq!(new_entryC, false);
-
-    // assert_eq!(empty.len(), 0);
-    // assert_eq!(mapA.len(), 1);
-    // assert_eq!(mapB.len(), 1);
-    // assert_eq!(mapC.len(), 1);
-}
-
-#[test]
-fn test_remove() {
-    let (map00, _) = (RedBlackTree::new()
-        .insert(1, 2)).first()
-        .insert(2, 4);
-
-    let (map01, _) = map00.clone().remove(&1);
-    let (map10, _) = map00.clone().remove(&2);
-    let (map11, _) = map01.clone().remove(&2);
-
-    assert_find!(map00, 1, 2);
-    assert_find!(map00, 2, 4);
-
-    assert_find!(map01, 1, None);
-    assert_find!(map01, 2, 4);
-
-    assert_find!(map11, 1, None);
-    assert_find!(map11, 2, None);
-
-    assert_find!(map10, 1, 2);
-    assert_find!(map10, 2, None);
-
-    assert!(map00.balanced());
-    assert!(map00.no_red_red());
-    assert!(map01.balanced());
-    assert!(map01.no_red_red());
-    assert!(map10.balanced());
-    assert!(map10.no_red_red());
-    assert!(map11.balanced());
-    assert!(map11.no_red_red());
-
-    // assert_eq!(map00.len(), 2);
-    // assert_eq!(map01.len(), 1);
-    // assert_eq!(map10.len(), 1);
-    // assert_eq!(map11.len(), 0);
-}
-
-#[test]
-fn test_random() {
-    use std::rand;
-    use std::hashmap::HashSet;
-
-    let mut values: HashSet<int> = HashSet::new();
-    let mut rng = rand::rng();
-
-    for _ in range(0, 1000) {
-        values.insert(rand::Rand::rand(&mut rng));
+impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone> PersistentMap<K, V> for RedBlackTree<K, V> {
+    #[inline]
+    fn insert(self, key: K, value: V) -> (RedBlackTree<K, V>, bool) {
+        self.insert(key, value)
     }
 
-    let mut map = RedBlackTree::new();
-
-    for &x in values.iter() {
-        let (map1, _) = map.insert(x, x);
-        assert!(map1.balanced());
-        assert!(map1.no_red_red());
-        map = map1;
-    }
-
-    for &x in values.iter() {
-        assert_find!(map, x, x);
-    }
-
-    for (i, x) in values.iter().enumerate() {
-        if i % 2 == 0 {
-            let (map1, _) = map.remove(x);
-            assert!(map1.balanced());
-            assert!(map1.no_red_red());
-            map = map1;
-        }
-    }
-
-    for (i, &x) in values.iter().enumerate() {
-        if i % 2 != 0 {
-            assert_find!(map, x, x);
-        } else {
-            assert_find!(map, x, None);
-        }
+    #[inline]
+    fn remove(self, key: &K) -> (RedBlackTree<K, V>, bool) {
+        self.remove(key)
     }
 }
 
-#[test]
-fn test_insert_ascending() {
-    let mut map = RedBlackTree::new();
-    for x in range(0, 1000) {
-        let (map1, _) = map.insert(x, x);
-        assert!(map1.balanced());
-        assert!(map1.no_red_red());
-        map = map1;
+impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone> Map<K, V> for RedBlackTree<K, V> {
+    #[inline]
+    fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
+        self.find(key)
     }
 }
 
-#[test]
-fn test_insert_descending() {
-    let data = range(0, 1000).to_owned_vec();
-    let mut map = RedBlackTree::new();
-    for &x in data.rev_iter() {
-        let (map1, _) = map.insert(x, x);
-        assert!(map1.balanced());
-        assert!(map1.no_red_red());
-        map = map1;
+impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone> Container for RedBlackTree<K, V> {
+    #[inline]
+    fn len(&self) -> uint {
+        self.len
     }
 }
 
-#[test]
-fn test_insert_descending_overwriting() {
-    let data = range(0, 1000).to_owned_vec();
-    let mut map = RedBlackTree::new();
-    for &x in data.rev_iter() {
-        let (map1, _) = map.insert(x, x);
-        assert!(map1.balanced());
-        assert!(map1.no_red_red());
-        map = map1;
+#[cfg(test)]
+mod tests {
+    use super::RedBlackTree;
+    use test::Test;
+    use extra::test::BenchHarness;
+
+    #[test]
+    fn test_insert_copy() { Test::test_insert(RedBlackTree::<u64, u64>::new()); }
+
+    #[test]
+    fn test_insert_overwrite_copy() { Test::test_insert_overwrite(RedBlackTree::<u64, u64>::new()); }
+
+    #[test]
+    fn test_remove_copy() { Test::test_remove(RedBlackTree::<u64, u64>::new()); }
+
+    #[test]
+    fn test_random_copy() { Test::test_random(RedBlackTree::<u64, u64>::new()); }
+
+    #[bench]
+    fn bench_insert_copy_10(bh: &mut BenchHarness) {
+        Test::bench_insert(RedBlackTree::<u64, u64>::new(), 10, bh);
     }
 
-    for &x in data.rev_iter() {
-        let (map1, _) = map.insert(x, x);
-        assert!(map1.balanced());
-        assert!(map1.no_red_red());
-        map = map1;
-    }
-}
-
-#[test]
-fn test_insert_ascending_overwriting() {
-    let mut map = RedBlackTree::new();
-    for x in range(0, 1000) {
-        let (map1, _) = map.insert(x, x);
-        assert!(map1.balanced());
-        assert!(map1.no_red_red());
-        map = map1;
+    #[bench]
+    fn bench_insert_copy_100(bh: &mut BenchHarness) {
+        Test::bench_insert(RedBlackTree::<u64, u64>::new(), 100, bh);
     }
 
-    for x in range(0, 1000) {
-        let (map1, _) = map.insert(x, x);
-        assert!(map1.balanced());
-        assert!(map1.no_red_red());
-        map = map1;
-    }
-}
-
-#[test]
-fn test_insert_arrg() {
-    let map0 = RedBlackTree::new();
-    let (map1, _) = map0.clone().insert(-2355952011642934374, -2355952011642934374);
-    let (map2, _) = map1.clone().insert(166785517347840485, 166785517347840485);
-    let (map3, _) = map2.clone().insert(-6442202968218938924, -6442202968218938924);
-    let (map4, _) = map3.clone().insert(7705992010132949805, 7705992010132949805);
-
-    assert!(map0.balanced());
-    assert!(map0.no_red_red());
-    assert!(map1.balanced());
-    assert!(map1.no_red_red());
-    assert!(map2.balanced());
-    assert!(map2.no_red_red());
-    assert!(map3.balanced());
-    assert!(map3.no_red_red());
-    assert!(map4.balanced());
-    assert!(map4.no_red_red());
-}
-
-#[bench]
-pub fn create_uuids(bh: &mut BenchHarness) {
-    use std::rand;
-    use std::hashmap::HashSet;
-
-    let mut values: HashSet<int> = HashSet::new();
-    let mut rng = rand::rng();
-
-    for _ in range(0, 10000) {
-        values.insert(rand::Rand::rand(&mut rng));
+    #[bench]
+    fn bench_insert_copy_1000(bh: &mut BenchHarness) {
+        Test::bench_insert(RedBlackTree::<u64, u64>::new(), 1000, bh);
     }
 
-    bh.iter(|| {
-        let mut map = RedBlackTree::new();
+    #[bench]
+    fn bench_insert_copy_50000(bh: &mut BenchHarness) {
+        Test::bench_insert(RedBlackTree::<u64, u64>::new(), 50000, bh);
+    }
 
-        for &x in values.iter() {
-            let (map1, _) = map.insert(x, x);
-            map = map1;
-        }
+    #[bench]
+    fn bench_find_copy_10(bh: &mut BenchHarness) {
+        Test::bench_find(RedBlackTree::<u64, u64>::new(), 10, bh);
+    }
 
-        for &x in values.iter() {
-            assert_find!(map, x, x);
-        }
+    #[bench]
+    fn bench_find_copy_100(bh: &mut BenchHarness) {
+        Test::bench_find(RedBlackTree::<u64, u64>::new(), 100, bh);
+    }
 
-        for (i, x) in values.iter().enumerate() {
-            if i % 2 == 0 {
-                let (map1, _) = map.remove(x);
-                map = map1;
-            }
-        }
+    #[bench]
+    fn bench_find_copy_1000(bh: &mut BenchHarness) {
+        Test::bench_find(RedBlackTree::<u64, u64>::new(), 1000, bh);
+    }
 
-        for (i, &x) in values.iter().enumerate() {
-            if i % 2 != 0 {
-                assert_find!(map, x, x);
-            } else {
-                assert_find!(map, x, None);
-            }
-        }
-    })
+    #[bench]
+    fn bench_find_copy_50000(bh: &mut BenchHarness) {
+        Test::bench_find(RedBlackTree::<u64, u64>::new(), 50000, bh);
+    }
 }

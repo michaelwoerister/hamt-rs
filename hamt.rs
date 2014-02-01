@@ -722,6 +722,11 @@ mod tests {
     }
 
     #[bench]
+    fn bench_insert_copy_50000(bh: &mut BenchHarness) {
+        Test::bench_insert(HamtMapCopy::<u64, u64>::new(), 50000, bh);
+    }
+
+    #[bench]
     fn bench_find_copy_10(bh: &mut BenchHarness) {
         Test::bench_find(HamtMapCopy::<u64, u64>::new(), 10, bh);
     }
@@ -734,6 +739,11 @@ mod tests {
     #[bench]
     fn bench_find_copy_1000(bh: &mut BenchHarness) {
         Test::bench_find(HamtMapCopy::<u64, u64>::new(), 1000, bh);
+    }
+
+    #[bench]
+    fn bench_find_copy_50000(bh: &mut BenchHarness) {
+        Test::bench_find(HamtMapCopy::<u64, u64>::new(), 50000, bh);
     }
 
 
@@ -765,6 +775,11 @@ mod tests {
     }
 
     #[bench]
+    fn bench_insert_share_50000(bh: &mut BenchHarness) {
+        Test::bench_insert(HamtMapShare::<u64, u64>::new(), 50000, bh);
+    }
+
+    #[bench]
     fn bench_find_share_10(bh: &mut BenchHarness) {
         Test::bench_find(HamtMapShare::<u64, u64>::new(), 10, bh);
     }
@@ -777,5 +792,10 @@ mod tests {
     #[bench]
     fn bench_find_share_1000(bh: &mut BenchHarness) {
         Test::bench_find(HamtMapShare::<u64, u64>::new(), 1000, bh);
+    }
+
+    #[bench]
+    fn bench_find_share_50000(bh: &mut BenchHarness) {
+        Test::bench_find(HamtMapShare::<u64, u64>::new(), 50000, bh);
     }
 }
