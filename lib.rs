@@ -27,3 +27,4 @@
 extern mod extra;
 pub mod persistent;
 pub mod hamt;
+pub mod test;
