@@ -23,10 +23,13 @@
 // THE SOFTWARE.
 
 use std::cast;
+use std::mem;
 use std::ptr;
 use std::vec;
 use std::unstable::intrinsics;
 use std::sync::atomics::{AtomicUint, Acquire, Release};
+use std::rt::global_heap::{exchange_malloc, exchange_free};
+
 use extra::arc::Arc;
 use persistent::PersistentMap;
 
@@ -56,40 +59,6 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze, IS: ItemStore<K, V> + Send +
     }
 }
 
-struct Node0<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..0] }
-struct Node1<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..1] }
-struct Node2<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..2] }
-struct Node3<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..3] }
-struct Node4<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..4] }
-struct Node5<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..5] }
-struct Node6<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..6] }
-struct Node7<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..7] }
-struct Node8<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..8] }
-struct Node9<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..9] }
-struct Node10<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..10] }
-struct Node11<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..11] }
-struct Node12<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..12] }
-struct Node13<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..13] }
-struct Node14<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..14] }
-struct Node15<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..15] }
-struct Node16<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..16] }
-struct Node17<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..17] }
-struct Node18<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..18] }
-struct Node19<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..19] }
-struct Node20<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..20] }
-struct Node21<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..21] }
-struct Node22<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..22] }
-struct Node23<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..23] }
-struct Node24<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..24] }
-struct Node25<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..25] }
-struct Node26<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..26] }
-struct Node27<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..27] }
-struct Node28<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..28] }
-struct Node29<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..29] }
-struct Node30<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..30] }
-struct Node31<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..31] }
-struct Node32<K, V, IS> { ref_count: AtomicUint, mask: u32, entries: [NodeEntry<K, V, IS>, ..32] }
-
 struct UnsafeNode<K, V, IS> {
     ref_count: AtomicUint,
     mask: u32,
@@ -97,6 +66,7 @@ struct UnsafeNode<K, V, IS> {
 }
 
 impl<K, V, IS> UnsafeNode<K, V, IS> {
+    #[inline]
     fn get_entry<'a>(&'a self, index: uint) -> &'a NodeEntry<K, V, IS> {
         unsafe {
             assert!(index < self.entry_count());
@@ -106,95 +76,51 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
         }
     }
 
+    #[inline]
     fn entry_count(&self) -> uint {
         bit_count(self.mask)
     }
 
     fn alloc(mask: u32) -> NodeRef<K, V, IS> {
-        unsafe {
-            let node_ptr: *mut UnsafeNode<K, V, IS> = match bit_count(mask) {
-                0 => cast::transmute(~intrinsics::uninit::<Node0<K, V, IS>>()),
-                1 => cast::transmute(~intrinsics::uninit::<Node1<K, V, IS>>()),
-                2 => cast::transmute(~intrinsics::uninit::<Node2<K, V, IS>>()),
-                3 => cast::transmute(~intrinsics::uninit::<Node3<K, V, IS>>()),
-                4 => cast::transmute(~intrinsics::uninit::<Node4<K, V, IS>>()),
-                5 => cast::transmute(~intrinsics::uninit::<Node5<K, V, IS>>()),
-                6 => cast::transmute(~intrinsics::uninit::<Node6<K, V, IS>>()),
-                7 => cast::transmute(~intrinsics::uninit::<Node7<K, V, IS>>()),
-                8 => cast::transmute(~intrinsics::uninit::<Node8<K, V, IS>>()),
-                9 => cast::transmute(~intrinsics::uninit::<Node9<K, V, IS>>()),
-                10 => cast::transmute(~intrinsics::uninit::<Node10<K, V, IS>>()),
-                11 => cast::transmute(~intrinsics::uninit::<Node11<K, V, IS>>()),
-                12 => cast::transmute(~intrinsics::uninit::<Node12<K, V, IS>>()),
-                13 => cast::transmute(~intrinsics::uninit::<Node13<K, V, IS>>()),
-                14 => cast::transmute(~intrinsics::uninit::<Node14<K, V, IS>>()),
-                15 => cast::transmute(~intrinsics::uninit::<Node15<K, V, IS>>()),
-                16 => cast::transmute(~intrinsics::uninit::<Node16<K, V, IS>>()),
-                17 => cast::transmute(~intrinsics::uninit::<Node17<K, V, IS>>()),
-                18 => cast::transmute(~intrinsics::uninit::<Node18<K, V, IS>>()),
-                19 => cast::transmute(~intrinsics::uninit::<Node19<K, V, IS>>()),
-                20 => cast::transmute(~intrinsics::uninit::<Node20<K, V, IS>>()),
-                21 => cast::transmute(~intrinsics::uninit::<Node21<K, V, IS>>()),
-                22 => cast::transmute(~intrinsics::uninit::<Node22<K, V, IS>>()),
-                23 => cast::transmute(~intrinsics::uninit::<Node23<K, V, IS>>()),
-                24 => cast::transmute(~intrinsics::uninit::<Node24<K, V, IS>>()),
-                25 => cast::transmute(~intrinsics::uninit::<Node25<K, V, IS>>()),
-                26 => cast::transmute(~intrinsics::uninit::<Node26<K, V, IS>>()),
-                27 => cast::transmute(~intrinsics::uninit::<Node27<K, V, IS>>()),
-                28 => cast::transmute(~intrinsics::uninit::<Node28<K, V, IS>>()),
-                29 => cast::transmute(~intrinsics::uninit::<Node29<K, V, IS>>()),
-                30 => cast::transmute(~intrinsics::uninit::<Node30<K, V, IS>>()),
-                31 => cast::transmute(~intrinsics::uninit::<Node31<K, V, IS>>()),
-                32 => cast::transmute(~intrinsics::uninit::<Node32<K, V, IS>>()),
-                _ => fail!("")
+        fn size_of_zero_entry_array<K, V, IS>() -> uint {
+            let node: UnsafeNode<K, V, IS> = UnsafeNode {
+                ref_count: AtomicUint::new(0),
+                mask: 0,
+                __entries: [],
             };
 
+            mem::size_of_val(&node.__entries)
+        }
+        #[inline]
+        fn align_to(size: uint, align: uint) -> uint {
+            assert!(align != 0 && bit_count(align as u32) == 1);
+            (size + align - 1) & !(align - 1)
+        }
+
+        let align = mem::pref_align_of::<NodeEntry<K, V, IS>>();
+
+        assert!(size_of_zero_entry_array::<K, V, IS>() == 0);
+        let header_size = align_to(mem::size_of::<UnsafeNode<K, V, IS>>(), align);
+        let node_size = header_size + bit_count(mask) * mem::size_of::<NodeEntry<K, V, IS>>();
+
+        unsafe {
+            let node_ptr: *mut UnsafeNode<K, V, IS> = cast::transmute(exchange_malloc(node_size));
             intrinsics::move_val_init(&mut (*node_ptr).ref_count, AtomicUint::new(1));
             intrinsics::move_val_init(&mut (*node_ptr).mask, mask);
-
             NodeRef { ptr: node_ptr }
         }
     }
 
     fn destroy(&self) {
         unsafe {
-            let ptr: *UnsafeNode<K, V, IS> = cast::transmute(self);
-            match self.entry_count() {
-                0 => { let _: ~Node0<K, V, IS> = cast::transmute(ptr); }
-                1 => { let _: ~Node1<K, V, IS> = cast::transmute(ptr); }
-                2 => { let _: ~Node2<K, V, IS> = cast::transmute(ptr); }
-                3 => { let _: ~Node3<K, V, IS> = cast::transmute(ptr); }
-                4 => { let _: ~Node4<K, V, IS> = cast::transmute(ptr); }
-                5 => { let _: ~Node5<K, V, IS> = cast::transmute(ptr); }
-                6 => { let _: ~Node6<K, V, IS> = cast::transmute(ptr); }
-                7 => { let _: ~Node7<K, V, IS> = cast::transmute(ptr); }
-                8 => { let _: ~Node8<K, V, IS> = cast::transmute(ptr); }
-                9 => { let _: ~Node9<K, V, IS> = cast::transmute(ptr); }
-                10 => { let _: ~Node10<K, V, IS> = cast::transmute(ptr); }
-                11 => { let _: ~Node11<K, V, IS> = cast::transmute(ptr); }
-                12 => { let _: ~Node12<K, V, IS> = cast::transmute(ptr); }
-                13 => { let _: ~Node13<K, V, IS> = cast::transmute(ptr); }
-                14 => { let _: ~Node14<K, V, IS> = cast::transmute(ptr); }
-                15 => { let _: ~Node15<K, V, IS> = cast::transmute(ptr); }
-                16 => { let _: ~Node16<K, V, IS> = cast::transmute(ptr); }
-                17 => { let _: ~Node17<K, V, IS> = cast::transmute(ptr); }
-                18 => { let _: ~Node18<K, V, IS> = cast::transmute(ptr); }
-                19 => { let _: ~Node19<K, V, IS> = cast::transmute(ptr); }
-                20 => { let _: ~Node20<K, V, IS> = cast::transmute(ptr); }
-                21 => { let _: ~Node21<K, V, IS> = cast::transmute(ptr); }
-                22 => { let _: ~Node22<K, V, IS> = cast::transmute(ptr); }
-                23 => { let _: ~Node23<K, V, IS> = cast::transmute(ptr); }
-                24 => { let _: ~Node24<K, V, IS> = cast::transmute(ptr); }
-                25 => { let _: ~Node25<K, V, IS> = cast::transmute(ptr); }
-                26 => { let _: ~Node26<K, V, IS> = cast::transmute(ptr); }
-                27 => { let _: ~Node27<K, V, IS> = cast::transmute(ptr); }
-                28 => { let _: ~Node28<K, V, IS> = cast::transmute(ptr); }
-                29 => { let _: ~Node29<K, V, IS> = cast::transmute(ptr); }
-                30 => { let _: ~Node30<K, V, IS> = cast::transmute(ptr); }
-                31 => { let _: ~Node31<K, V, IS> = cast::transmute(ptr); }
-                32 => { let _: ~Node32<K, V, IS> = cast::transmute(ptr); }
-                _ => fail!("")
+            let entry_count = self.entry_count();
+
+            for i in range(0, entry_count) {
+                // destroy the contained object, trick from Rc
+                ptr::read_ptr(self.get_entry(i));
             }
+
+            exchange_free(cast::transmute(self));
         }
     }
 }
@@ -204,12 +130,14 @@ struct NodeRef<K, V, IS> {
 }
 
 impl<K, V, IS> NodeRef<K, V, IS> {
+    #[inline]
     fn borrow<'a>(&'a self) -> &'a UnsafeNode<K, V, IS> {
         unsafe {
             cast::transmute(self.ptr)
         }
     }
 
+    #[inline]
     fn set_entry<'a>(&mut self, index: uint, entry: NodeEntry<K, V, IS>) {
         unsafe {
             assert!(index < (*self.ptr).entry_count());
