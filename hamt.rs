@@ -32,16 +32,11 @@ use std::rt::global_heap::{exchange_malloc, exchange_free};
 
 use extra::arc::Arc;
 use persistent::PersistentMap;
-
+use item_store::{ItemStore, CopyStore, ShareStore};
 
 static LAST_LEVEL: uint = (64 / 5) - 1;
 static BITS_PER_LEVEL: uint = 5;
 static LEVEL_BIT_MASK: u64 = 0b11111;
-
-trait ItemStore<K, V> : Clone {
-    fn key<'a>(&'a self) -> &'a K;
-    fn val<'a>(&'a self) -> &'a V;
-}
 
 enum NodeEntry<K, V, IS> {
     Collision(Arc<~[IS]>),
@@ -661,24 +656,7 @@ fn bit_count(x: u32) -> uint {
 }
 
 // Copy --------------------------------------------------------------------------------------------
-struct CopyStore<K, V> {
-    key: K,
-    val: V
-}
 
-impl<K: Clone, V: Clone> ItemStore<K, V> for CopyStore<K, V> {
-    fn key<'a>(&'a self) -> &'a K { &self.key }
-    fn val<'a>(&'a self) -> &'a V { &self.val }
-}
-
-impl<K: Clone, V: Clone> Clone for CopyStore<K, V> {
-    fn clone(&self) -> CopyStore<K, V> {
-        CopyStore {
-            key: self.key.clone(),
-            val: self.val.clone(),
-        }
-    }
-}
 
 struct HamtMapCopy<K, V> {
     map: HamtMap<K, V, CopyStore<K, V>>
@@ -727,23 +705,6 @@ impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone> Container for HamtMapCo
 }
 
 // Share -------------------------------------------------------------------------------------------
-struct ShareStore<K, V> {
-    store: Arc<(K, V)>,
-}
-
-impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone> ItemStore<K, V> for ShareStore<K, V> {
-    fn key<'a>(&'a self) -> &'a K { self.store.get().first_ref() }
-    fn val<'a>(&'a self) -> &'a V { self.store.get().second_ref() }
-}
-
-impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone> Clone for ShareStore<K, V> {
-    fn clone(&self) -> ShareStore<K, V> {
-        ShareStore {
-            store: self.store.clone()
-        }
-    }
-}
-
 struct HamtMapShare<K, V> {
     map: HamtMap<K, V, ShareStore<K, V>>
 }

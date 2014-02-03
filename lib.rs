@@ -27,5 +27,7 @@
 extern mod extra;
 pub mod persistent;
 pub mod hamt;
-pub mod test;
+mod test;
 pub mod rbtree;
+
+mod item_store;
