@@ -34,9 +34,9 @@ use extra::arc::Arc;
 use persistent::PersistentMap;
 use item_store::{ItemStore, CopyStore, ShareStore};
 
-static LAST_LEVEL: uint = (64 / 5) - 1;
 static BITS_PER_LEVEL: uint = 5;
-static LEVEL_BIT_MASK: u64 = 0b11111;
+static LAST_LEVEL: uint = (64 / BITS_PER_LEVEL) - 1;
+static LEVEL_BIT_MASK: u64 = (1 << BITS_PER_LEVEL) - 1;
 
 enum NodeEntry<K, V, IS> {
     Collision(Arc<~[IS]>),
@@ -775,6 +775,14 @@ mod tests {
     fn test_insert_copy() { Test::test_insert(HamtMapCopy::<u64, u64>::new()); }
 
     #[test]
+    fn test_insert_ascending_copy() { Test::test_insert_ascending(HamtMapCopy::<u64, u64>::new()); }
+
+    #[test]
+    fn test_insert_descending_copy() {
+        Test::test_insert_descending(HamtMapCopy::<u64, u64>::new());
+    }
+
+    #[test]
     fn test_insert_overwrite_copy() { Test::test_insert_overwrite(HamtMapCopy::<u64, u64>::new()); }
 
     #[test]
@@ -826,6 +834,16 @@ mod tests {
 
     #[test]
     fn test_insert_share() { Test::test_insert(HamtMapShare::<u64, u64>::new()); }
+
+    #[test]
+    fn test_insert_ascending_share() {
+        Test::test_insert_ascending(HamtMapShare::<u64, u64>::new());
+    }
+
+    #[test]
+    fn test_insert_descending_share() {
+        Test::test_insert_descending(HamtMapShare::<u64, u64>::new());
+    }
 
     #[test]
     fn test_insert_overwrite_share() { Test::test_insert_overwrite(HamtMapShare::<u64, u64>::new()); }

@@ -52,6 +52,27 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
         assert_eq!(map11.len(), 2);
     }
 
+    pub fn test_insert_ascending(empty: TPersistentMap) {
+        let mut map = empty;
+
+        for x in range(0u64, 1000u64) {
+            assert_eq!(map.len() as u64, x);
+            map = map.insert(x, x).first();
+            assert_find!(map, x, x);
+        }
+    }
+
+    pub fn test_insert_descending(empty: TPersistentMap) {
+        let mut map = empty;
+
+        for x in range(0u64, 1000u64) {
+            let key = 999u64 - x;
+            assert_eq!(map.len() as u64, x);
+            map = map.insert(key, x).first();
+            assert_find!(map, key, x);
+        }
+    }
+
     pub fn test_insert_overwrite(empty: TPersistentMap) {
         let (mapA, new_entryA) = empty.clone().insert(1, 2);
         let (mapB, new_entryB) = mapA.clone().insert(1, 4);
