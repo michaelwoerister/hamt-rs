@@ -1,7 +1,3 @@
-// Hash Array Mapped Trie Implementation
-// Based on "Ideal Hash Trees" by Phil Bagwell:
-// http://lampwww.epfl.ch/papers/idealhashtrees.pdf
-
 // Copyright (c) 2013 Michael Woerister
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
