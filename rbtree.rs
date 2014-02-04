@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Michael Woerister
+// Copyright (c) 2014 Michael Woerister
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -17,9 +17,10 @@
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
+
 use extra::arc::Arc;
 use persistent::PersistentMap;
-use item_store::{ItemStore, CopyStore};
+use item_store::{ItemStore, CopyStore, ShareStore};
 
 #[deriving(Clone, Eq)]
 enum Color {
@@ -110,16 +111,6 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> NodeRe
         self.data.is_none()
     }
 
-    fn children(&self) -> (NodeRef<K, V, IS>, NodeRef<K, V, IS>) {
-        match self.data {
-            Some(ref data_ref) => {
-                let data_ref = data_ref.get();
-                (data_ref.left.clone(), data_ref.right.clone())
-            }
-            None => unreachable!()
-        }
-    }
-
     fn get_data<'a>(&'a self) -> &'a NodeData<K, V, IS> {
         match self.data {
             Some(ref data_ref) => data_ref.get(),
@@ -127,10 +118,6 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> NodeRe
         }
     }
 
-
-    // (define/match (redden node)
-    //   [(T cmp _ l k v r)   (T cmp 'R l k v r)]
-    //   [(L _)               (error "Can't redden leaf.")])
     fn redden(self) -> NodeRef<K, V, IS> {
         assert!(!self.is_leaf());
         NodeRef {
@@ -139,10 +126,6 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> NodeRe
         }
     }
 
-    // (define/match (blacken node)
-    // [(T cmp _ l k v r)  (T cmp 'B l k v r)]
-    // [(BBL cmp)          (L cmp)]
-    // [(L _)              node])
     fn blacken(self) -> NodeRef<K, V, IS> {
         NodeRef {
             col: Black,
@@ -178,58 +161,54 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> NodeRe
     }
 
     // Calculates the max black nodes on path:
-    fn count_black_height(&self, combine: |u64, u64| -> u64) -> u64 {
-        assert!(self.col == Red || self.col == Black);
+    // fn count_black_height(&self, combine: |u64, u64| -> u64) -> u64 {
+    //     assert!(self.col == Red || self.col == Black);
 
-        match self.data {
-            // [(T! c l r)
-            Some(ref data_ref) => {
-                let data_ref = data_ref.get();
-                // (+ (if (eq? c 'B) 1 0) (max (max-black-height l)
-                //                  (max-black-height r)))
-                let this = if self.col == Black { 1 } else { 0 };
-                let sub = combine(data_ref.left.count_black_height(|a, b| combine(a, b)),
-                                  data_ref.right.count_black_height(|a, b| combine(a, b)));
-                this + sub
-            }
-            // [(L!)     1]
-            None => { 1 }
-        }
-    }
+    //     match self.data {
+    //         Some(ref data_ref) => {
+    //             let data_ref = data_ref.get();
+    //             let this = if self.col == Black { 1 } else { 0 };
+    //             let sub = combine(data_ref.left.count_black_height(|a, b| combine(a, b)),
+    //                               data_ref.right.count_black_height(|a, b| combine(a, b)));
+    //             this + sub
+    //         }
+    //         None => { 1 }
+    //     }
+    // }
 
     // Does this tree contain a red child of red?
-    fn no_red_red(&self) -> bool {
-        assert!(self.col == Red || self.col == Black);
-        if !self.is_leaf() {
-            let (l, r) = self.children();
-            assert!(l.col == Red || l.col == Black);
-            assert!(r.col == Red || r.col == Black);
+    // fn no_red_red(&self) -> bool {
+    //     assert!(self.col == Red || self.col == Black);
+    //     if !self.is_leaf() {
+    //         let (l, r) = self.children();
+    //         assert!(l.col == Red || l.col == Black);
+    //         assert!(r.col == Red || r.col == Black);
 
-            if self.col == Black {
-                return l.no_red_red() && r.no_red_red();
-            }
+    //         if self.col == Black {
+    //             return l.no_red_red() && r.no_red_red();
+    //         }
 
-            if self.col == Red && l.col == Black && r.col == Black {
-                return l.no_red_red() && r.no_red_red();
-            }
+    //         if self.col == Red && l.col == Black && r.col == Black {
+    //             return l.no_red_red() && r.no_red_red();
+    //         }
 
-            return false;
-        } else {
-            return true;
-        }
-    }
+    //         return false;
+    //     } else {
+    //         return true;
+    //     }
+    // }
 
     // Is this tree black-balanced?
-    fn black_balanced(&self) -> bool {
-        self.count_black_height(::std::num::max) == self.count_black_height(::std::num::min)
-    }
+    // fn black_balanced(&self) -> bool {
+    //     self.count_black_height(::std::num::max) == self.count_black_height(::std::num::min)
+    // }
 
     // Returns the maxium (key . value) pair:
-    fn find_max_kvp(&self) -> IS {
+    fn find_max_kvp<'a>(&'a self) -> &'a IS {
         assert!(!self.is_leaf());
         let node = self.get_data();
         if node.right.is_leaf() {
-            node.item.clone()
+            &node.item
         } else {
             node.right.find_max_kvp()
         }
@@ -243,19 +222,32 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> NodeRe
         if self.is_leaf() {
             assert!(self.col == Black);
             *insertion_count = 1;
-            new_node(Red, (*self).clone(), kvp, (*self).clone())
+            new_node(Red,
+                     new_leaf(Black),
+                     kvp,
+                     new_leaf(Black))
         } else {
-            let local_item = &self.get_data().item;
-            let c = self.col;
-            let (l, r) = self.children();
+            let node_data = self.get_data();
+            let node_color = self.col;
 
-            if *kvp.key() < *local_item.key() {
-                new_node(c, l.modify_at_rec(kvp, insertion_count), local_item.clone(), r).balance()
-            } else if *kvp.key() > *local_item.key() {
-                new_node(c, l, local_item.clone(), r.modify_at_rec(kvp, insertion_count)).balance()
+            if *kvp.key() < *node_data.item.key() {
+                new_node(node_color,
+                         node_data.left.modify_at_rec(kvp, insertion_count),
+                         node_data.item.clone(),
+                         node_data.right.clone())
+                .balance()
+            } else if *kvp.key() > *node_data.item.key() {
+                new_node(node_color,
+                         node_data.left.clone(),
+                         node_data.item.clone(),
+                         node_data.right.modify_at_rec(kvp, insertion_count))
+                .balance()
             } else {
                 *insertion_count = 0;
-                new_node(c, l, kvp, r)
+                new_node(node_color,
+                         node_data.left.clone(),
+                         kvp,
+                         node_data.right.clone())
             }
         }
     }
@@ -263,180 +255,186 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> NodeRe
     // WAT!
     fn balance(self) -> NodeRef<K, V, IS> {
         assert!(!self.is_leaf());
+        {
+            let root_data = self.get_data();
+            let left_child = &root_data.left;
+            let right_child = &root_data.right;
 
-        if self.col == Black || self.col == DoubleBlack {
-            let result_col = self.col.dec();
-            let node_data = self.get_data();
-            let (left_child, right_child) = self.children();
+            if self.col == Black || self.col == DoubleBlack {
+                let result_col = self.col.dec();
 
-            if left_child.col == Red {
-                assert!(!left_child.is_leaf());
-                let (left_grand_child, right_grand_child) = left_child.children();
 
-                if left_grand_child.col == Red {
-                    assert!(!left_grand_child.is_leaf());
-                    let left_grand_child = left_grand_child.get_data();
-                    return new_node(result_col,
-                                    new_node(Black,
-                                             left_grand_child.left.clone(),
-                                             left_grand_child.item.clone(),
-                                             left_grand_child.right.clone()),
-                                    left_child.get_data().item.clone(),
-                                    new_node(Black,
-                                             right_grand_child,
-                                             node_data.item.clone(),
-                                             right_child)
-                    );
+                if left_child.col == Red {
+                    assert!(!left_child.is_leaf());
+                    let left_child_data = left_child.get_data();
+                    let left_grand_child = &left_child_data.left;
+                    let right_grand_child = &left_child_data.right;
+
+                    if left_grand_child.col == Red {
+                        assert!(!left_grand_child.is_leaf());
+                        let left_grand_child_data = left_grand_child.get_data();
+                        return new_node(result_col,
+                                        new_node(Black,
+                                                 left_grand_child_data.left.clone(),
+                                                 left_grand_child_data.item.clone(),
+                                                 left_grand_child_data.right.clone()),
+                                        left_child.get_data().item.clone(),
+                                        new_node(Black,
+                                                 right_grand_child.clone(),
+                                                 root_data.item.clone(),
+                                                 right_child.clone())
+                        );
+                    }
+
+                    if right_grand_child.col == Red {
+                        assert!(!right_grand_child.is_leaf());
+                        let right_grand_child_data = right_grand_child.get_data();
+                        return new_node(result_col,
+                                        new_node(Black,
+                                                 left_grand_child.clone(),
+                                                 left_child.get_data().item.clone(),
+                                                 right_grand_child_data.left.clone()),
+                                        right_grand_child_data.item.clone(),
+                                        new_node(Black,
+                                                 right_grand_child_data.right.clone(),
+                                                 root_data.item.clone(),
+                                                 right_child.clone()));
+                    }
                 }
 
-                if right_grand_child.col == Red {
-                    assert!(!right_grand_child.is_leaf());
-                    let right_grand_child = right_grand_child.get_data();
-                    return new_node(result_col,
-                                    new_node(Black,
-                                             left_grand_child,
-                                             left_child.get_data().item.clone(),
-                                             right_grand_child.left.clone()),
-                                    right_grand_child.item.clone(),
-                                    new_node(Black,
-                                             right_grand_child.right.clone(),
-                                             node_data.item.clone(),
-                                             right_child));
-                }
-            }
+                if right_child.col == Red {
+                    assert!(!right_child.is_leaf());
+                    let right_child_data = right_child.get_data();
+                    let left_grand_child = &right_child_data.left;
+                    let right_grand_child = &right_child_data.right;
 
-            if right_child.col == Red {
-                assert!(!right_child.is_leaf());
-                let a = left_child;
-                let lc_item = node_data.item.clone();
-                let (left_grand_child, right_grand_child) = right_child.children();
+                    if left_grand_child.col == Red {
+                        assert!(!left_grand_child.is_leaf());
+                        let left_grand_child_data = left_grand_child.get_data();
+                        return new_node(result_col,
+                                        new_node(Black,
+                                                 left_child.clone(),
+                                                 root_data.item.clone(),
+                                                 left_grand_child_data.left.clone()),
+                                        left_grand_child_data.item.clone(),
+                                        new_node(Black,
+                                                 left_grand_child_data.right.clone(),
+                                                 right_child_data.item.clone(),
+                                                 right_grand_child.clone()));
+                    }
 
-                if left_grand_child.col == Red {
-                    assert!(!left_grand_child.is_leaf());
-                    let (b, c) = left_grand_child.children();
-                    let root_item = left_grand_child.get_data().item.clone();
-                    let z_item = right_child.get_data().item.clone();
-                    let d = right_grand_child;
-                    return new_tree(result_col, a, b, c, d, lc_item, root_item, z_item);
-                }
+                    if right_grand_child.col == Red {
+                        assert!(!right_grand_child.is_leaf());
+                        let right_grand_child_data = right_grand_child.get_data();
 
-                if right_grand_child.col == Red {
-                    assert!(!right_grand_child.is_leaf());
-                    let b = left_grand_child;
-                    let root_item = right_child.get_data().item.clone();
-                    let (c, d) = right_grand_child.children();
-                    let z_item = right_grand_child.get_data().item.clone();
-                    return new_tree(result_col, a, b, c, d, lc_item, root_item, z_item);
-                }
-            }
-        }
-
-        if self.col == DoubleBlack {
-            let (left_child, right_child) = self.children();
-
-            if right_child.col == NegativeBlack {
-                assert!(!right_child.is_leaf());
-                let (left_grand_child, right_grand_child) = right_child.children();
-
-                if !left_grand_child.is_leaf() &&
-                   left_grand_child.col == Black &&
-                   right_grand_child.col == Black {
-                    let (b, c) = left_grand_child.children();
-                    let x_kvp = self.get_data().item.clone();
-                    let y_kvp = left_grand_child.get_data().item.clone();
-                    let z_kvp = right_child.get_data().item.clone();
-                    let d = right_grand_child;
-
-                    return new_node(
-                        Black,
-                        new_node(Black, left_child, x_kvp, b),
-                        y_kvp,
-                        new_node(Black, c, z_kvp, d.redden()).balance()
-                    );
+                        return new_node(result_col,
+                                        new_node(Black,
+                                                 left_child.clone(),
+                                                 root_data.item.clone(),
+                                                 left_grand_child.clone()),
+                                        right_child_data.item.clone(),
+                                        new_node(Black,
+                                                 right_grand_child_data.left.clone(),
+                                                 right_grand_child_data.item.clone(),
+                                                 right_grand_child_data.right.clone()));
+                    }
                 }
             }
 
-            if left_child.col == NegativeBlack {
-                assert!(!left_child.is_leaf());
-                let (left_grand_child, right_grand_child) = left_child.children();
+            if self.col == DoubleBlack {
+                if right_child.col == NegativeBlack {
+                    assert!(!right_child.is_leaf());
+                    let right_child_data = right_child.get_data();
+                    let left_grand_child = &right_child_data.left;
+                    let right_grand_child = &right_child_data.right;
 
-                if left_grand_child.col == Black &&
-                   !right_grand_child.is_leaf() &&
-                   right_grand_child.col == Black {
-                    let a = left_grand_child;
-                    let x_kvp = left_child.get_data().item.clone();
-                    let (b, c) = right_grand_child.children();
-                    let y_kvp = right_grand_child.get_data().item.clone();
-                    let z_kvp = self.get_data().item.clone();
+                    if !left_grand_child.is_leaf() &&
+                       left_grand_child.col == Black &&
+                       right_grand_child.col == Black {
+                        let left_grand_child_data = left_grand_child.get_data();
+                        return new_node(Black,
+                                        new_node(Black,
+                                                 left_child.clone(),
+                                                 root_data.item.clone(),
+                                                 left_grand_child_data.left.clone()),
+                                        left_grand_child_data.item.clone(),
+                                        new_node(Black,
+                                                 left_grand_child_data.right.clone(),
+                                                 right_child_data.item.clone(),
+                                                 right_grand_child.clone().redden()).balance()
+                        );
+                    }
+                }
 
-                    return new_node(
-                        Black,
-                        new_node(Black, a.redden(), x_kvp, b).balance(),
-                        y_kvp,
-                        new_node(Black, c, z_kvp, right_child)
-                    );
+                if left_child.col == NegativeBlack {
+                    assert!(!left_child.is_leaf());
+                    let left_child_data = left_child.get_data();
+                    let left_grand_child = &left_child_data.left;
+                    let right_grand_child = &left_child_data.right;
+
+                    if left_grand_child.col == Black &&
+                       !right_grand_child.is_leaf() &&
+                       right_grand_child.col == Black {
+                        let right_grand_child_data = right_grand_child.get_data();
+                        return new_node(Black,
+                                        new_node(Black,
+                                                 left_grand_child.clone().redden(),
+                                                 left_child_data.item.clone(),
+                                                 right_grand_child_data.left.clone()).balance(),
+                                        right_grand_child_data.item.clone(),
+                                        new_node(Black,
+                                                 right_grand_child_data.right.clone(),
+                                                 root_data.item.clone(),
+                                                 right_child.clone()));
+                    }
                 }
             }
         }
 
         return self;
-
-        // Creates a small new tree of the form:
-        //           r
-        //     lc         rc
-        //  ll    lr   rl    rr
-        //
-        fn new_tree<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>>(
-            color: Color,
-            left_left: NodeRef<K, V, IS>,
-            left_right: NodeRef<K, V, IS>,
-            right_left: NodeRef<K, V, IS>,
-            right_right: NodeRef<K, V, IS>,
-            left_child_kvp: IS,
-            root_kvp: IS,
-            right_child_kvp: IS)
-         -> NodeRef<K, V, IS> {
-            return new_node(color,
-                new_node(Black, left_left, left_child_kvp, left_right),
-                root_kvp,
-                new_node(Black, right_left, right_child_kvp, right_right));
-        }
     }
 
-    // ; Deletes a key from this map:
+    // Deletes a key from this map
     fn delete(&self, search_key: &K, removal_count: &mut uint) -> NodeRef<K, V, IS> {
-        // Finds the node to be removed:
+        // Finds the node to be removed
         fn del<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>>(
             node: &NodeRef<K, V, IS>,
             search_key: &K,
             removal_count: &mut uint)
          -> NodeRef<K, V, IS> {
             if !node.is_leaf() {
-                let c = node.col;
-                let kvp = node.get_data().item.clone();
-                let (l, r) = node.children();
+                let node_data = node.get_data();
+                let node_key = node_data.item.key();
 
-                if *search_key < *kvp.key() {
-                    bubble(c, del(&l, search_key, removal_count), kvp, r)
-                } else if *search_key > *kvp.key() {
-                    bubble(c, l, kvp, del(&r, search_key, removal_count))
+                if *search_key < *node_key {
+                    bubble(node.col,
+                           del(&node_data.left, search_key, removal_count),
+                           node_data.item.clone(),
+                           node_data.right.clone())
+                } else if *search_key > *node_key {
+                    bubble(node.col,
+                           node_data.left.clone(),
+                           node_data.item.clone(),
+                           del(&node_data.right, search_key, removal_count))
                 } else {
                     *removal_count = 1;
                     remove(node)
                 }
             } else {
                 *removal_count = 0;
-                node.clone()
+                new_leaf(Black)
             }
         }
 
-        // Removes this node; it might
-        // leave behind a double-black node:
+        // Removes this node. might leave behind a double-black node:
         fn remove<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>>(
             node: &NodeRef<K, V, IS>) -> NodeRef<K, V, IS> {
             assert!(!node.is_leaf());
-            // Leaves are easiest to kill:
-            let (left, right) = node.children();
+
+            let node_data = node.get_data();
+            let left = &node_data.left;
+            let right = &node_data.right;
+
             if left.is_leaf() && right.is_leaf() {
                 return if node.col == Red {
                     new_leaf(Black)
@@ -446,64 +444,54 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> NodeRe
                 };
             }
 
-            // Killing a node with one child;
-            // parent or child is red:
-            //    [(or (R child (L!))
-            //         (R (L!) child))
-            // ; =>
-            // child]
             if node.col == Red {
                 if right.is_leaf() {
-                    return left;
+                    return left.clone();
                 }
 
                 if left.is_leaf() {
-                    return right;
+                    return right.clone();
                 }
             }
 
             if node.col == Black {
-                // [(or (B (R l k v r) (L!))
                 if left.col == Red && right.is_leaf() {
-                    let data = left.get_data();
-                    // (T cmp 'B l k v r)]
-                    return new_node(Black, data.left.clone(), data.item.clone(), data.right.clone());
+                    let left_child_data = left.get_data();
+                    return new_node(Black,
+                                    left_child_data.left.clone(),
+                                    left_child_data.item.clone(),
+                                    left_child_data.right.clone());
                 }
 
-                //      (B (L!) (R l k v r)))
                 if left.is_leaf() && right.col == Red {
-                    let data = right.get_data();
-                    // (T cmp 'B l k v r)]
-                    return new_node(Black, data.left.clone(), data.item.clone(), data.right.clone());
+                    let right_child_data = right.get_data();
+                    return new_node(Black,
+                                    right_child_data.left.clone(),
+                                    right_child_data.item.clone(),
+                                    right_child_data.right.clone());
                 }
 
-                // Killing a black node with one black child:
-                // [(or (B (L!) (and child (B)))
-                //      (B (and child (B)) (L!)))
                 if left.is_leaf() && right.col == Black {
-                    // (black+1 child)
-                    let child = right.clone().inc();
-                    return child;
+                    return right.clone().inc();
                 }
 
                 if left.col == Black && right.is_leaf() {
-                    // (black+1 child)
-                    let child = left.clone().inc();
-                    return child;
+                    return left.clone().inc();
                 }
             }
 
             if !left.is_leaf() && !right.is_leaf() {
                 let kvp = left.find_max_kvp();
-                let new_left = remove_max(&left);
-                return bubble(node.col, new_left, kvp, right);
+                return bubble(node.col,
+                              remove_max(left),
+                              kvp.clone(),
+                              right.clone());
             }
 
             unreachable!();
         }
 
         // Kills a double-black, or moves it to the top:
-        // (define (bubble c l k v r)
         fn bubble<K: Ord+Clone+Send+Freeze,
                   V: Clone+Send+Freeze,
                   IS: ItemStore<K, V>>(
@@ -537,8 +525,7 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> NodeRe
             }
         }
 
-        // Delete the key, and color the new root black:
-        // (blacken (del node)))
+        // Delete the key, and color the new root black
         del(self, search_key, removal_count).blacken()
     }
 }
@@ -575,100 +562,161 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> RedBla
         (RedBlackTree { root: new_root, len: self.len - removal_count }, removal_count != 0)
     }
 
-    pub fn len(&self) -> uint {
-        self.len
+    // fn balanced(&self) -> bool {
+    //     self.root.black_balanced()
+    // }
+
+    // fn no_red_red(&self) -> bool {
+    //     self.root.no_red_red()
+    // }
+}
+
+impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone> PersistentMap<K, V> for RedBlackTree<K, V, CopyStore<K, V>> {
+    #[inline]
+    fn insert(self, key: K, value: V) -> (RedBlackTree<K, V, CopyStore<K, V>>, bool) {
+        self.insert(CopyStore { key: key, val: value })
     }
 
-    fn balanced(&self) -> bool {
-        self.root.black_balanced()
-    }
-
-    fn no_red_red(&self) -> bool {
-        self.root.no_red_red()
+    #[inline]
+    fn remove(self, key: &K) -> (RedBlackTree<K, V, CopyStore<K, V>>, bool) {
+        self.remove(key)
     }
 }
 
-// impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone, IS: ItemStore<K, V>> PersistentMap<K, V> for RedBlackTree<K, V, IS> {
-//     #[inline]
-//     fn insert(self, key: K, value: V) -> (RedBlackTree<K, V, IS>, bool) {
-//         self.insert(key, value)
-//     }
+impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone> PersistentMap<K, V> for RedBlackTree<K, V, ShareStore<K, V>> {
+    #[inline]
+    fn insert(self, key: K, value: V) -> (RedBlackTree<K, V, ShareStore<K, V>>, bool) {
+        self.insert(ShareStore::new(key, value))
+    }
 
-//     #[inline]
-//     fn remove(self, key: &K) -> (RedBlackTree<K, V, IS>, bool) {
-//         self.remove(key)
-//     }
-// }
+    #[inline]
+    fn remove(self, key: &K) -> (RedBlackTree<K, V, ShareStore<K, V>>, bool) {
+        self.remove(key)
+    }
+}
 
-// impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone, IS: ItemStore<K, V>> Map<K, V> for RedBlackTree<K, V, IS> {
-//     #[inline]
-//     fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
-//         self.find(key)
-//     }
-// }
+impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone, IS: ItemStore<K, V>> Map<K, V> for RedBlackTree<K, V, IS> {
+    #[inline]
+    fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
+        self.find(key)
+    }
+}
 
-// impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone, IS: ItemStore<K, V>> Container for RedBlackTree<K, V, IS> {
-//     #[inline]
-//     fn len(&self) -> uint {
-//         self.len
-//     }
-// }
+impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone, IS: ItemStore<K, V>> Container for RedBlackTree<K, V, IS> {
+    #[inline]
+    fn len(&self) -> uint {
+        self.len
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::RedBlackTree;
     use test::Test;
     use extra::test::BenchHarness;
+    use item_store::{CopyStore, ShareStore};
 
-    // #[test]
-    // fn test_insert_copy() { Test::test_insert(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new()); }
+    #[test]
+    fn test_insert_copy() { Test::test_insert(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new()); }
 
-    // #[test]
-    // fn test_insert_overwrite_copy() { Test::test_insert_overwrite(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new()); }
+    #[test]
+    fn test_insert_overwrite_copy() { Test::test_insert_overwrite(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new()); }
 
-    // #[test]
-    // fn test_remove_copy() { Test::test_remove(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new()); }
+    #[test]
+    fn test_remove_copy() { Test::test_remove(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new()); }
 
-    // #[test]
-    // fn test_random_copy() { Test::test_random(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new()); }
+    #[test]
+    fn test_random_copy() { Test::test_random(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new()); }
 
-    // #[bench]
-    // fn bench_insert_copy_10(bh: &mut BenchHarness) {
-    //     Test::bench_insert(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 10, bh);
-    // }
+    #[bench]
+    fn bench_insert_copy_10(bh: &mut BenchHarness) {
+        Test::bench_insert(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 10, bh);
+    }
 
-    // #[bench]
-    // fn bench_insert_copy_100(bh: &mut BenchHarness) {
-    //     Test::bench_insert(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 100, bh);
-    // }
+    #[bench]
+    fn bench_insert_copy_100(bh: &mut BenchHarness) {
+        Test::bench_insert(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 100, bh);
+    }
 
-    // #[bench]
-    // fn bench_insert_copy_1000(bh: &mut BenchHarness) {
-    //     Test::bench_insert(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 1000, bh);
-    // }
+    #[bench]
+    fn bench_insert_copy_1000(bh: &mut BenchHarness) {
+        Test::bench_insert(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 1000, bh);
+    }
 
-    // #[bench]
-    // fn bench_insert_copy_50000(bh: &mut BenchHarness) {
-    //     Test::bench_insert(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 50000, bh);
-    // }
+    #[bench]
+    fn bench_insert_copy_50000(bh: &mut BenchHarness) {
+        Test::bench_insert(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 50000, bh);
+    }
 
-    // #[bench]
-    // fn bench_find_copy_10(bh: &mut BenchHarness) {
-    //     Test::bench_find(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 10, bh);
-    // }
+    #[bench]
+    fn bench_find_copy_10(bh: &mut BenchHarness) {
+        Test::bench_find(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 10, bh);
+    }
 
-    // #[bench]
-    // fn bench_find_copy_100(bh: &mut BenchHarness) {
-    //     Test::bench_find(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 100, bh);
-    // }
+    #[bench]
+    fn bench_find_copy_100(bh: &mut BenchHarness) {
+        Test::bench_find(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 100, bh);
+    }
 
-    // #[bench]
-    // fn bench_find_copy_1000(bh: &mut BenchHarness) {
-    //     Test::bench_find(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 1000, bh);
-    // }
+    #[bench]
+    fn bench_find_copy_1000(bh: &mut BenchHarness) {
+        Test::bench_find(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 1000, bh);
+    }
 
-    // #[bench]
-    // fn bench_find_copy_50000(bh: &mut BenchHarness) {
-    //     Test::bench_find(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 50000, bh);
-    // }
+    #[bench]
+    fn bench_find_copy_50000(bh: &mut BenchHarness) {
+        Test::bench_find(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 50000, bh);
+    }
+
+    #[test]
+    fn test_insert_shared() { Test::test_insert(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new()); }
+
+    #[test]
+    fn test_insert_overwrite_shared() { Test::test_insert_overwrite(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new()); }
+
+    #[test]
+    fn test_remove_shared() { Test::test_remove(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new()); }
+
+    #[test]
+    fn test_random_shared() { Test::test_random(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new()); }
+
+    #[bench]
+    fn bench_insert_shared_10(bh: &mut BenchHarness) {
+        Test::bench_insert(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 10, bh);
+    }
+
+    #[bench]
+    fn bench_insert_shared_100(bh: &mut BenchHarness) {
+        Test::bench_insert(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 100, bh);
+    }
+
+    #[bench]
+    fn bench_insert_shared_1000(bh: &mut BenchHarness) {
+        Test::bench_insert(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 1000, bh);
+    }
+
+    #[bench]
+    fn bench_insert_shared_50000(bh: &mut BenchHarness) {
+        Test::bench_insert(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 50000, bh);
+    }
+
+    #[bench]
+    fn bench_find_shared_10(bh: &mut BenchHarness) {
+        Test::bench_find(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 10, bh);
+    }
+
+    #[bench]
+    fn bench_find_shared_100(bh: &mut BenchHarness) {
+        Test::bench_find(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 100, bh);
+    }
+
+    #[bench]
+    fn bench_find_shared_1000(bh: &mut BenchHarness) {
+        Test::bench_find(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 1000, bh);
+    }
+
+    #[bench]
+    fn bench_find_shared_50000(bh: &mut BenchHarness) {
+        Test::bench_find(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 50000, bh);
+    }
 }
