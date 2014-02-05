@@ -1,7 +1,3 @@
-// Hash Array Mapped Trie Implementation
-// Based on "Ideal Hash Trees" by Phil Bagwell:
-// http://lampwww.epfl.ch/papers/idealhashtrees.pdf
-
 // Copyright (c) 2013 Michael Woerister
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -22,6 +18,10 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+// Hash Array Mapped Trie Implementation
+// Based on "Ideal Hash Trees" by Phil Bagwell:
+// http://lampwww.epfl.ch/papers/idealhashtrees.pdf
+
 use std::cast;
 use std::mem;
 use std::ptr;
@@ -34,10 +34,87 @@ use extra::arc::Arc;
 use persistent::PersistentMap;
 use item_store::{ItemStore, CopyStore, ShareStore};
 
+
+//=-------------------------------------------------------------------------------------------------
+// NodeRef
+//=-------------------------------------------------------------------------------------------------
+struct NodeRef<K, V, IS> {
+    ptr: *mut UnsafeNode<K, V, IS>
+}
+
+enum NodeRefBorrowResult<'a, K, V, IS> {
+    OwnedNode(&'a mut UnsafeNode<K, V, IS>),
+    SharedNode(&'a UnsafeNode<K, V, IS>),
+}
+
+impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> NodeRef<K, V, IS> {
+    #[inline]
+    fn borrow<'a>(&'a self) -> &'a UnsafeNode<K, V, IS> {
+        unsafe {
+            cast::transmute(self.ptr)
+        }
+    }
+
+    fn borrow_mut<'a>(&'a mut self) -> &'a mut UnsafeNode<K, V, IS> {
+        unsafe {
+            assert!((*self.ptr).ref_count.load(Acquire) == 1);
+            cast::transmute(self.ptr)
+        }
+    }
+
+    fn try_borrow_owned<'a>(&'a mut self) -> NodeRefBorrowResult<'a, K, V, IS> {
+        unsafe {
+            if (*self.ptr).ref_count.load(Acquire) == 1 {
+                OwnedNode(cast::transmute(self.ptr))
+            } else {
+                SharedNode(cast::transmute(self.ptr))
+            }
+        }
+    }
+}
+
+#[unsafe_destructor]
+impl<K, V, IS> Drop for NodeRef<K, V, IS> {
+    fn drop(&mut self) {
+        unsafe {
+            let node: &mut UnsafeNode<K, V, IS> = cast::transmute(self.ptr);
+            let old_count = node.ref_count.fetch_sub(1, Acquire);
+            assert!(old_count >= 1);
+            if old_count == 1 {
+                node.destroy()
+            }
+        }
+    }
+}
+
+impl<K, V, IS> Clone for NodeRef<K, V, IS> {
+    fn clone(&self) -> NodeRef<K, V, IS> {
+        unsafe {
+            let node: &mut UnsafeNode<K, V, IS> = cast::transmute(self.ptr);
+            let old_count = node.ref_count.fetch_add(1, Release);
+            assert!(old_count >= 1);
+        }
+
+        NodeRef { ptr: self.ptr }
+    }
+}
+
+
+
+//=-------------------------------------------------------------------------------------------------
+// UnsafeNode
+//=-------------------------------------------------------------------------------------------------
 static BITS_PER_LEVEL: uint = 5;
 static LAST_LEVEL: uint = (64 / BITS_PER_LEVEL) - 1;
 static LEVEL_BIT_MASK: u64 = (1 << BITS_PER_LEVEL) - 1;
-static MIN_CAPACITY: uint = 8;
+static MIN_CAPACITY: uint = 4;
+
+struct UnsafeNode<K, V, IS> {
+    ref_count: AtomicUint,
+    mask: u32,
+    capacity: u8,
+    __entries: [NodeEntry<K, V, IS>, ..0],
+}
 
 enum NodeEntry<K, V, IS> {
     Collision(Arc<~[IS]>),
@@ -45,7 +122,19 @@ enum NodeEntry<K, V, IS> {
     SubTree(NodeRef<K, V, IS>)
 }
 
-impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze, IS: ItemStore<K, V> + Send + Freeze> Clone for NodeEntry<K, V, IS> {
+enum RemovalResult<K, V, IS> {
+    // Don't do anything
+    NoChange,
+    // Replace the sub-tree entry with another sub-tree entry pointing to the given node
+    ReplaceSubTree(NodeRef<K, V, IS>),
+    // Collapse the sub-tree into a singe-item entry
+    CollapseSubTree(IS),
+    // Completely remove the entry
+    KillSubTree
+}
+
+// Clone for NodeEntry
+impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> Clone for NodeEntry<K, V, IS> {
     fn clone(&self) -> NodeEntry<K, V, IS> {
         match *self {
             Collision(ref items) => Collision(items.clone()),
@@ -55,13 +144,7 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze, IS: ItemStore<K, V> + Send +
     }
 }
 
-struct UnsafeNode<K, V, IS> {
-    ref_count: AtomicUint,
-    mask: u32,
-    capacity: u8,
-    __entries: [NodeEntry<K, V, IS>, ..0],
-}
-
+// impl UnsafeNode
 impl<K, V, IS> UnsafeNode<K, V, IS> {
     #[inline]
     fn get_entry<'a>(&'a self, index: uint) -> &'a NodeEntry<K, V, IS> {
@@ -150,79 +233,8 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
     }
 }
 
-struct NodeRef<K, V, IS> {
-    ptr: *mut UnsafeNode<K, V, IS>
-}
-
-enum NodeRefBorrowResult<'a, K, V, IS> {
-    OwnedNode(&'a mut UnsafeNode<K, V, IS>),
-    SharedNode(&'a UnsafeNode<K, V, IS>),
-}
-
-impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> NodeRef<K, V, IS> {
-    #[inline]
-    fn borrow<'a>(&'a self) -> &'a UnsafeNode<K, V, IS> {
-        unsafe {
-            cast::transmute(self.ptr)
-        }
-    }
-
-    fn borrow_mut<'a>(&'a mut self) -> &'a mut UnsafeNode<K, V, IS> {
-        unsafe {
-            assert!((*self.ptr).ref_count.load(Acquire) == 1);
-            cast::transmute(self.ptr)
-        }
-    }
-
-    fn try_borrow_owned<'a>(&'a mut self) -> NodeRefBorrowResult<'a, K, V, IS> {
-        unsafe {
-            if (*self.ptr).ref_count.load(Acquire) == 1 {
-                OwnedNode(cast::transmute(self.ptr))
-            } else {
-                SharedNode(cast::transmute(self.ptr))
-            }
-        }
-    }
-}
-
-#[unsafe_destructor]
-impl<K, V, IS> Drop for NodeRef<K, V, IS> {
-    fn drop(&mut self) {
-        unsafe {
-            let node: &mut UnsafeNode<K, V, IS> = cast::transmute(self.ptr);
-            let old_count = node.ref_count.fetch_sub(1, Acquire);
-            assert!(old_count >= 1);
-            if old_count == 1 {
-                node.destroy()
-            }
-        }
-    }
-}
-
-impl<K, V, IS> Clone for NodeRef<K, V, IS> {
-    fn clone(&self) -> NodeRef<K, V, IS> {
-        unsafe {
-            let node: &mut UnsafeNode<K, V, IS> = cast::transmute(self.ptr);
-            let old_count = node.ref_count.fetch_add(1, Release);
-            assert!(old_count >= 1);
-        }
-
-        NodeRef { ptr: self.ptr }
-    }
-}
-
-enum RemovalResult<K, V, IS> {
-    // Don't do anything
-    NoChange,
-    // Replace the sub-tree entry with another sub-tree entry pointing to the given node
-    ReplaceSubTree(NodeRef<K, V, IS>),
-    // Collapse the sub-tree into a singe-item entry
-    CollapseSubTree(IS),
-    // Completely remove the entry
-    KillSubTree
-}
-
-impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze, IS: ItemStore<K, V>> UnsafeNode<K, V, IS> {
+// impl UnsafeNode (continued)
+impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, V, IS> {
     fn insert(&self,
               hash: u64,
               level: uint,
@@ -330,12 +342,12 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze, IS: ItemStore<K, V>> UnsafeN
                            level: uint,
                            new_kvp: IS,
                            insertion_count: &mut uint)
-                        -> bool {
+                        -> Option<NodeRef<K, V, IS>> {
         assert!(level <= LAST_LEVEL);
         let local_key = (hash & LEVEL_BIT_MASK) as uint;
 
         if !self.can_insert_in_place(local_key) {
-            return false;
+            return Some(self.insert(hash, level, new_kvp, insertion_count));
         }
 
         // See if the slot is free
@@ -343,19 +355,18 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze, IS: ItemStore<K, V>> UnsafeN
             // If yes, then fill it with a single-item entry
             *insertion_count = 1;
             self.insert_entry_in_place(local_key, SingleItem(new_kvp));
-            return true;
+            return None;
         }
 
         let index = get_index(self.mask, local_key);
 
-        let xxx = match *self.get_entry_mut(index) {
+        let new_entry = match *self.get_entry_mut(index) {
             SingleItem(ref existing_entry) => {
                 let existing_key = existing_entry.key();
 
                 if *existing_key == *new_kvp.key() {
                     *insertion_count = 0;
                     // Replace entry for the given key
-                    //self.insert_entry_in_place(local_key, SingleItem(new_kvp));
                     Some(SingleItem(new_kvp))
                 } else if level != LAST_LEVEL {
                     *insertion_count = 1;
@@ -375,8 +386,6 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze, IS: ItemStore<K, V>> UnsafeN
 
                     // 3. return a copy of this node with the single-item entry replaced by the new
                     // subtree entry
-                    // self.copy_with_new_entry(local_key, SubTree(new_sub_tree))
-                    //self.insert_entry_in_place(local_key, SubTree(new_sub_tree));
                     Some(SubTree(new_sub_tree))
                 } else {
                     *insertion_count = 1;
@@ -384,8 +393,6 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze, IS: ItemStore<K, V>> UnsafeN
                     // collision node
                     let items = ~[new_kvp, existing_entry.clone()];
                     let collision_entry = Collision(Arc::new(items));
-                    //self.copy_with_new_entry(local_key, collision_entry)
-                    // self.insert_entry_in_place(local_key, collision_entry);
                     Some(collision_entry)
                 }
             }
@@ -424,8 +431,6 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze, IS: ItemStore<K, V>> UnsafeN
                     }
                 };
 
-                //self.copy_with_new_entry(local_key, Collision(Arc::new(new_items)))
-                //self.insert_entry_in_place(local_key, Collision(Arc::new(new_items)));
                 Some(Collision(Arc::new(new_items)))
             }
             SubTree(ref mut subtree_ref) => {
@@ -437,30 +442,28 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze, IS: ItemStore<K, V>> UnsafeN
                                                          insertion_count)))
                     }
                     OwnedNode(subtree) => {
-                        if !subtree.try_insert_in_place(hash >> BITS_PER_LEVEL,
-                                                        level + 1,
-                                                        new_kvp.clone(),
-                                                        insertion_count) {
-                            Some(SubTree(subtree.insert(hash >> BITS_PER_LEVEL,
+                        match subtree.try_insert_in_place(hash >> BITS_PER_LEVEL,
                                                           level + 1,
-                                                          new_kvp,
-                                                          insertion_count)))
-                        } else {
-                            None
+                                                          new_kvp.clone(),
+                                                          insertion_count) {
+                            Some(new_sub_tree) => Some(SubTree(new_sub_tree)),
+                            None => None
                         }
                     }
                 }
             }
         };
 
-        match xxx {
+        match new_entry {
             Some(e) => {
                 self.insert_entry_in_place(local_key, e);
             }
-            None => {}
+            None => {
+                /* No new entry to be inserted, because the subtree could be modified in-place */
+            }
         }
 
-        return true;
+        return None;
     }
 
     fn remove(&self,
@@ -776,25 +779,17 @@ impl<K:Hash + Eq + Send + Freeze, V: Send + Freeze, IS: ItemStore<K, V>> UnsafeN
     }
 }
 
+
+
+//=-------------------------------------------------------------------------------------------------
+// HamtMap
+//=-------------------------------------------------------------------------------------------------
 struct HamtMap<K, V, IS> {
     root: NodeRef<K, V, IS>,
     element_count: uint,
 }
 
-// Clone
-impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V> + Send + Freeze> Clone for HamtMap<K, V, IS> {
-    fn clone(&self) -> HamtMap<K, V, IS> {
-        HamtMap { root: self.root.clone(), element_count: self.element_count }
-    }
-}
-
-// Container
-impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> Container for HamtMap<K, V, IS> {
-    fn len(&self) -> uint {
-        self.element_count
-    }
-}
-
+// impl HamtMap
 impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V> + Send + Freeze> HamtMap<K, V, IS> {
 
     fn new() -> HamtMap<K, V, IS> {
@@ -844,22 +839,15 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V> + Send + Freeze
         }
     }
 
-    fn insert(mut self, kvp: IS) -> (HamtMap<K, V, IS>, bool) {
+    fn insert_internal(mut self, kvp: IS) -> (HamtMap<K, V, IS>, bool) {
         let hash = kvp.key().hash();
-        let mut new_entry_count = 0xdeadbeaf;
+        let mut num_of_additions = 0xdeadbeaf;
         let element_count = self.element_count;
 
+        // If we hold the only reference to the root node, then try to insert the KVP in-place
         let new_root = match self.root.try_borrow_owned() {
-            OwnedNode(mutable) => {
-                if mutable.try_insert_in_place(hash, 0, kvp.clone(), &mut new_entry_count) {
-                    None
-                } else {
-                    Some(mutable.insert(hash, 0, kvp, &mut new_entry_count))
-                }
-            }
-            SharedNode(immutable) => {
-                Some(immutable.insert(hash, 0, kvp, &mut new_entry_count))
-            }
+            OwnedNode(mutable) => mutable.try_insert_in_place(hash, 0, kvp, &mut num_of_additions),
+            SharedNode(immutable) => Some(immutable.insert(hash, 0, kvp, &mut num_of_additions))
         };
 
         let new_root = match new_root {
@@ -867,22 +855,19 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V> + Send + Freeze
             None => self.root
         };
 
-        // let new_root = self.root.borrow().insert(hash,
-        //                                          0,
-        //                                          kvp,
-        //                                          &mut new_entry_count);
-        assert!(new_entry_count != 0xdeadbeaf);
+        // Make sure that new_entry_count was set properly
+        assert!(num_of_additions != 0xdeadbeaf);
 
         (
             HamtMap {
                 root: new_root,
-                element_count: element_count + new_entry_count
+                element_count: element_count + num_of_additions
             },
-            new_entry_count != 0
+            num_of_additions != 0
         )
     }
 
-    fn remove(self, key: &K) -> (HamtMap<K, V, IS>, bool) {
+    fn remove_internal(self, key: &K) -> (HamtMap<K, V, IS>, bool) {
         let hash = key.hash();
         let mut removal_count = 0xdeadbeaf;
         let removal_result = self.root.borrow().remove(hash, 0, key, &mut removal_count);
@@ -921,6 +906,69 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V> + Send + Freeze
     }
 }
 
+// Clone for HamtMap
+impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone, IS: ItemStore<K, V>>
+Clone for HamtMap<K, V, IS> {
+
+    #[inline]
+    fn clone(&self) -> HamtMap<K, V, IS> {
+        HamtMap { root: self.root.clone(), element_count: self.element_count }
+    }
+}
+
+// Container for HamtMap
+impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone, IS: ItemStore<K, V>>
+Container for HamtMap<K, V, IS> {
+
+    #[inline]
+    fn len(&self) -> uint {
+        self.element_count
+    }
+}
+
+// Map for HamtMap
+impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone, IS: ItemStore<K, V>>
+Map<K, V> for HamtMap<K, V, IS> {
+
+    #[inline]
+    fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
+        self.find(key)
+    }
+}
+
+// PersistentMap for HamtMap<CopyStore>
+impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone>
+PersistentMap<K, V> for HamtMap<K, V, CopyStore<K, V>> {
+
+    #[inline]
+    fn insert(self, key: K, value: V) -> (HamtMap<K, V, CopyStore<K, V>>, bool) {
+        self.insert_internal(CopyStore { key: key, val: value })
+    }
+
+    #[inline]
+    fn remove(self, key: &K) -> (HamtMap<K, V, CopyStore<K, V>>, bool) {
+        self.remove_internal(key)
+    }
+}
+
+// PersistentMap for HamtMap<ShareStore>
+impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone>
+PersistentMap<K, V> for HamtMap<K, V, ShareStore<K, V>> {
+
+    #[inline]
+    fn insert(self, key: K, value: V) -> (HamtMap<K, V, ShareStore<K, V>>, bool) {
+        self.insert_internal(ShareStore::new(key,value))
+    }
+
+    #[inline]
+    fn remove(self, key: &K) -> (HamtMap<K, V, ShareStore<K, V>>, bool) {
+        self.remove_internal(key)
+    }
+}
+
+//=-------------------------------------------------------------------------------------------------
+// Utility functions
+//=-------------------------------------------------------------------------------------------------
 #[inline]
 fn get_index(mask: u32, index: uint) -> uint {
     assert!((mask & (1 << index)) != 0);
@@ -938,109 +986,16 @@ fn bit_count(x: u32) -> uint {
     }
 }
 
-// Copy --------------------------------------------------------------------------------------------
-
-
-struct HamtMapCopy<K, V> {
-    map: HamtMap<K, V, CopyStore<K, V>>
-}
-
-impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone> HamtMapCopy<K, V> {
-    #[inline]
-    pub fn new() -> HamtMapCopy<K, V> {
-        HamtMapCopy {
-            map: HamtMap::new()
-        }
-    }
-}
-
-impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone> Clone for HamtMapCopy<K, V> {
-    #[inline]
-    fn clone(&self) -> HamtMapCopy<K, V> {
-        HamtMapCopy { map: self.map.clone() }
-    }
-}
-
-impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone> PersistentMap<K, V> for HamtMapCopy<K, V> {
-    fn insert(self, key: K, value: V) -> (HamtMapCopy<K, V>, bool) {
-        let (new_map, flag) = self.map.insert(CopyStore { key: key, val: value });
-        (HamtMapCopy { map: new_map }, flag)
-    }
-
-    fn remove(self, key: &K) -> (HamtMapCopy<K, V>, bool) {
-        let (new_map, flag) = self.map.remove(key);
-        (HamtMapCopy { map: new_map }, flag)
-    }
-}
-
-impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone> Map<K, V> for HamtMapCopy<K, V> {
-    #[inline]
-    fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
-        self.map.find(key)
-    }
-}
-
-impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone> Container for HamtMapCopy<K, V> {
-    #[inline]
-    fn len<'a>(&'a self) -> uint {
-        self.map.len()
-    }
-}
-
-// Share -------------------------------------------------------------------------------------------
-struct HamtMapShare<K, V> {
-    map: HamtMap<K, V, ShareStore<K, V>>
-}
-
-impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone> HamtMapShare<K, V> {
-    #[inline]
-    pub fn new() -> HamtMapShare<K, V> {
-        HamtMapShare {
-            map: HamtMap::new()
-        }
-    }
-}
-
-impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone> Clone for HamtMapShare<K, V> {
-    #[inline]
-    fn clone(&self) -> HamtMapShare<K, V> {
-        HamtMapShare { map: self.map.clone() }
-    }
-}
-
-impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone> PersistentMap<K, V> for HamtMapShare<K, V> {
-    fn insert(self, key: K, value: V) -> (HamtMapShare<K, V>, bool) {
-        let (new_map, flag) = self.map.insert(ShareStore { store: Arc::new((key,value)) });
-        (HamtMapShare { map: new_map }, flag)
-    }
-
-    fn remove(self, key: &K) -> (HamtMapShare<K, V>, bool) {
-        let (new_map, flag) = self.map.remove(key);
-        (HamtMapShare { map: new_map }, flag)
-    }
-}
-
-impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone> Map<K, V> for HamtMapShare<K, V> {
-    #[inline]
-    fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
-        self.map.find(key)
-    }
-}
-
-impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone> Container for HamtMapShare<K, V> {
-    #[inline]
-    fn len<'a>(&'a self) -> uint {
-        self.map.len()
-    }
-}
-
-
 #[cfg(test)]
 mod tests {
     use super::get_index;
-    use super::{HamtMapCopy, HamtMapShare};
+    use super::HamtMap;
+    use item_store::{CopyStore, ShareStore};
     use test::Test;
     use extra::test::BenchHarness;
+
+    type CopyStoreU64 = CopyStore<u64, u64>;
+    type ShareStoreU64 = ShareStore<u64, u64>;
 
     #[test]
     fn test_get_index() {
@@ -1055,125 +1010,125 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_copy() { Test::test_insert(HamtMapCopy::<u64, u64>::new()); }
+    fn test_insert_copy() { Test::test_insert(HamtMap::<u64, u64, CopyStoreU64>::new()); }
 
     #[test]
-    fn test_insert_ascending_copy() { Test::test_insert_ascending(HamtMapCopy::<u64, u64>::new()); }
+    fn test_insert_ascending_copy() { Test::test_insert_ascending(HamtMap::<u64, u64, CopyStoreU64>::new()); }
 
     #[test]
     fn test_insert_descending_copy() {
-        Test::test_insert_descending(HamtMapCopy::<u64, u64>::new());
+        Test::test_insert_descending(HamtMap::<u64, u64, CopyStoreU64>::new());
     }
 
     #[test]
-    fn test_insert_overwrite_copy() { Test::test_insert_overwrite(HamtMapCopy::<u64, u64>::new()); }
+    fn test_insert_overwrite_copy() { Test::test_insert_overwrite(HamtMap::<u64, u64, CopyStoreU64>::new()); }
 
     #[test]
-    fn test_remove_copy() { Test::test_remove(HamtMapCopy::<u64, u64>::new()); }
+    fn test_remove_copy() { Test::test_remove(HamtMap::<u64, u64, CopyStoreU64>::new()); }
 
     #[test]
-    fn test_random_copy() { Test::test_random(HamtMapCopy::<u64, u64>::new()); }
+    fn test_random_copy() { Test::test_random(HamtMap::<u64, u64, CopyStoreU64>::new()); }
 
     #[bench]
     fn bench_insert_copy_10(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMapCopy::<u64, u64>::new(), 10, bh);
+        Test::bench_insert(HamtMap::<u64, u64, CopyStoreU64>::new(), 10, bh);
     }
 
     #[bench]
     fn bench_insert_copy_100(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMapCopy::<u64, u64>::new(), 100, bh);
+        Test::bench_insert(HamtMap::<u64, u64, CopyStoreU64>::new(), 100, bh);
     }
 
     #[bench]
     fn bench_insert_copy_1000(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMapCopy::<u64, u64>::new(), 1000, bh);
+        Test::bench_insert(HamtMap::<u64, u64, CopyStoreU64>::new(), 1000, bh);
     }
 
     #[bench]
     fn bench_insert_copy_50000(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMapCopy::<u64, u64>::new(), 50000, bh);
+        Test::bench_insert(HamtMap::<u64, u64, CopyStoreU64>::new(), 50000, bh);
     }
 
     #[bench]
     fn bench_find_copy_10(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMapCopy::<u64, u64>::new(), 10, bh);
+        Test::bench_find(HamtMap::<u64, u64, CopyStoreU64>::new(), 10, bh);
     }
 
     #[bench]
     fn bench_find_copy_100(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMapCopy::<u64, u64>::new(), 100, bh);
+        Test::bench_find(HamtMap::<u64, u64, CopyStoreU64>::new(), 100, bh);
     }
 
     #[bench]
     fn bench_find_copy_1000(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMapCopy::<u64, u64>::new(), 1000, bh);
+        Test::bench_find(HamtMap::<u64, u64, CopyStoreU64>::new(), 1000, bh);
     }
 
     #[bench]
     fn bench_find_copy_50000(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMapCopy::<u64, u64>::new(), 50000, bh);
+        Test::bench_find(HamtMap::<u64, u64, CopyStoreU64>::new(), 50000, bh);
     }
 
 
     #[test]
-    fn test_insert_share() { Test::test_insert(HamtMapShare::<u64, u64>::new()); }
+    fn test_insert_share() { Test::test_insert(HamtMap::<u64, u64, ShareStoreU64>::new()); }
 
     #[test]
     fn test_insert_ascending_share() {
-        Test::test_insert_ascending(HamtMapShare::<u64, u64>::new());
+        Test::test_insert_ascending(HamtMap::<u64, u64, ShareStoreU64>::new());
     }
 
     #[test]
     fn test_insert_descending_share() {
-        Test::test_insert_descending(HamtMapShare::<u64, u64>::new());
+        Test::test_insert_descending(HamtMap::<u64, u64, ShareStoreU64>::new());
     }
 
     #[test]
-    fn test_insert_overwrite_share() { Test::test_insert_overwrite(HamtMapShare::<u64, u64>::new()); }
+    fn test_insert_overwrite_share() { Test::test_insert_overwrite(HamtMap::<u64, u64, ShareStoreU64>::new()); }
 
     #[test]
-    fn test_remove_share() { Test::test_remove(HamtMapShare::<u64, u64>::new()); }
+    fn test_remove_share() { Test::test_remove(HamtMap::<u64, u64, ShareStoreU64>::new()); }
 
     #[test]
-    fn test_random_share() { Test::test_random(HamtMapShare::<u64, u64>::new()); }
+    fn test_random_share() { Test::test_random(HamtMap::<u64, u64, ShareStoreU64>::new()); }
 
     #[bench]
     fn bench_insert_share_10(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMapShare::<u64, u64>::new(), 10, bh);
+        Test::bench_insert(HamtMap::<u64, u64, ShareStoreU64>::new(), 10, bh);
     }
 
     #[bench]
     fn bench_insert_share_100(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMapShare::<u64, u64>::new(), 100, bh);
+        Test::bench_insert(HamtMap::<u64, u64, ShareStoreU64>::new(), 100, bh);
     }
 
     #[bench]
     fn bench_insert_share_1000(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMapShare::<u64, u64>::new(), 1000, bh);
+        Test::bench_insert(HamtMap::<u64, u64, ShareStoreU64>::new(), 1000, bh);
     }
 
     #[bench]
     fn bench_insert_share_50000(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMapShare::<u64, u64>::new(), 50000, bh);
+        Test::bench_insert(HamtMap::<u64, u64, ShareStoreU64>::new(), 50000, bh);
     }
 
     #[bench]
     fn bench_find_share_10(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMapShare::<u64, u64>::new(), 10, bh);
+        Test::bench_find(HamtMap::<u64, u64, ShareStoreU64>::new(), 10, bh);
     }
 
     #[bench]
     fn bench_find_share_100(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMapShare::<u64, u64>::new(), 100, bh);
+        Test::bench_find(HamtMap::<u64, u64, ShareStoreU64>::new(), 100, bh);
     }
 
     #[bench]
     fn bench_find_share_1000(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMapShare::<u64, u64>::new(), 1000, bh);
+        Test::bench_find(HamtMap::<u64, u64, ShareStoreU64>::new(), 1000, bh);
     }
 
     #[bench]
     fn bench_find_share_50000(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMapShare::<u64, u64>::new(), 50000, bh);
+        Test::bench_find(HamtMap::<u64, u64, ShareStoreU64>::new(), 50000, bh);
     }
 }
