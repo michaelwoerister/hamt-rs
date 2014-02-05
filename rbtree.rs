@@ -668,6 +668,26 @@ mod tests {
         Test::bench_find(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 50000, bh);
     }
 
+    #[bench]
+    fn bench_remove_copy_10(bh: &mut BenchHarness) {
+        Test::bench_remove(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 10, bh);
+    }
+
+    #[bench]
+    fn bench_remove_copy_100(bh: &mut BenchHarness) {
+        Test::bench_remove(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 100, bh);
+    }
+
+    #[bench]
+    fn bench_remove_copy_1000(bh: &mut BenchHarness) {
+        Test::bench_remove(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 1000, bh);
+    }
+
+    #[bench]
+    fn bench_remove_copy_50000(bh: &mut BenchHarness) {
+        Test::bench_remove(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 50000, bh);
+    }
+
     #[test]
     fn test_insert_shared() { Test::test_insert(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new()); }
 
@@ -718,5 +738,25 @@ mod tests {
     #[bench]
     fn bench_find_shared_50000(bh: &mut BenchHarness) {
         Test::bench_find(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 50000, bh);
+    }
+
+    #[bench]
+    fn bench_remove_shared_10(bh: &mut BenchHarness) {
+        Test::bench_remove(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 10, bh);
+    }
+
+    #[bench]
+    fn bench_remove_shared_100(bh: &mut BenchHarness) {
+        Test::bench_remove(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 100, bh);
+    }
+
+    #[bench]
+    fn bench_remove_shared_1000(bh: &mut BenchHarness) {
+        Test::bench_remove(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 1000, bh);
+    }
+
+    #[bench]
+    fn bench_remove_shared_50000(bh: &mut BenchHarness) {
+        Test::bench_remove(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 50000, bh);
     }
 }

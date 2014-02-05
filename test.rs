@@ -187,6 +187,24 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
             }
         })
     }
+
+    pub fn bench_remove(empty: TPersistentMap, count: uint, bh: &mut BenchHarness) {
+        let mut rng = rand::rng();
+        let values = ::std::vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
+        let mut map = empty;
+
+        for &x in values.iter() {
+            map = map.insert(x, x).first();
+        }
+
+        bh.iter(|| {
+            let mut map = map.clone();
+
+            for x in ::std::iter::range_step(0, count as u64, 2) {
+                map = map.remove(&values[x]).first();
+            }
+        })
+    }
 }
 
 fn bench_find_hashmap(count: uint, bh: &mut BenchHarness) {
@@ -204,6 +222,38 @@ fn bench_find_hashmap(count: uint, bh: &mut BenchHarness) {
         }
     })
 }
+
+fn bench_insert_hashmap(count: uint, bh: &mut BenchHarness) {
+    let mut rng = rand::rng();
+    let values = ::std::vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
+    let mut map = HashMap::<u64, u64>::new();
+
+    bh.iter(|| {
+        for &x in values.iter() {
+            map.insert(x, x);
+        }
+    })
+}
+
+fn bench_remove_hashmap(count: uint, bh: &mut BenchHarness) {
+    let mut rng = rand::rng();
+    let values = ::std::vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
+    let mut map = HashMap::<u64, u64>::new();
+
+    for &x in values.iter() {
+        map.insert(x, x);
+    }
+
+    bh.iter(|| {
+        for x in ::std::iter::range_step(0, count, 2) {
+            map.remove(&values[x]);
+        }
+    })
+}
+
+//=-------------------------------------------------------------------------------------------------
+// Bench std::HashMap::find()
+//=-------------------------------------------------------------------------------------------------
 
 #[bench]
 fn std_hashmap_find_10(bh: &mut BenchHarness) {
@@ -223,4 +273,56 @@ fn std_hashmap_find_1000(bh: &mut BenchHarness) {
 #[bench]
 fn std_hashmap_find_50000(bh: &mut BenchHarness) {
     bench_find_hashmap(50000, bh);
+}
+
+
+
+//=-------------------------------------------------------------------------------------------------
+// Bench std::HashMap::insert()
+//=-------------------------------------------------------------------------------------------------
+
+#[bench]
+fn std_hashmap_insert_10(bh: &mut BenchHarness) {
+    bench_insert_hashmap(10, bh);
+}
+
+#[bench]
+fn std_hashmap_insert_100(bh: &mut BenchHarness) {
+    bench_insert_hashmap(100, bh);
+}
+
+#[bench]
+fn std_hashmap_insert_1000(bh: &mut BenchHarness) {
+    bench_insert_hashmap(1000, bh);
+}
+
+#[bench]
+fn std_hashmap_insert_50000(bh: &mut BenchHarness) {
+    bench_insert_hashmap(50000, bh);
+}
+
+
+
+//=-------------------------------------------------------------------------------------------------
+// Bench std::HashMap::remove()
+//=-------------------------------------------------------------------------------------------------
+
+#[bench]
+fn std_hashmap_remove_10(bh: &mut BenchHarness) {
+    bench_remove_hashmap(10, bh);
+}
+
+#[bench]
+fn std_hashmap_remove_100(bh: &mut BenchHarness) {
+    bench_remove_hashmap(100, bh);
+}
+
+#[bench]
+fn std_hashmap_remove_1000(bh: &mut BenchHarness) {
+    bench_remove_hashmap(1000, bh);
+}
+
+#[bench]
+fn std_hashmap_remove_50000(bh: &mut BenchHarness) {
+    bench_remove_hashmap(50000, bh);
 }
