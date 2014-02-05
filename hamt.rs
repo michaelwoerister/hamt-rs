@@ -109,17 +109,50 @@ static LAST_LEVEL: uint = (64 / BITS_PER_LEVEL) - 1;
 static LEVEL_BIT_MASK: u64 = (1 << BITS_PER_LEVEL) - 1;
 static MIN_CAPACITY: uint = 4;
 
-struct UnsafeNode<K, V, IS> {
-    ref_count: AtomicUint,
-    mask: u32,
-    capacity: u8,
-    __entries: [NodeEntry<K, V, IS>, ..0],
+struct AlignmentStruct<K, V, IS> {
+    a: Arc<~[IS]>,
+    b: IS,
+    c: NodeRef<K, V, IS>
 }
 
-enum NodeEntry<K, V, IS> {
-    Collision(Arc<~[IS]>),
-    SingleItem(IS),
-    SubTree(NodeRef<K, V, IS>)
+struct UnsafeNode<K, V, IS> {
+    ref_count: AtomicUint,
+    entry_types: u64,
+    mask: u32,
+    capacity: u8,
+    __entries: [AlignmentStruct<K, V, IS>, ..0],
+}
+
+enum NodeEntry<'a, K, V, IS> {
+    Collision(&'a Arc<~[IS]>),
+    SingleItem(&'a IS),
+    SubTree(&'a NodeRef<K, V, IS>)
+}
+
+impl<'a, K: Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> NodeEntry<'a, K, V, IS> {
+    fn clone_out(&self) -> NodeEntryOwned<K, V, IS> {
+        match *self {
+            Collision(r) => CollisionOwned(r.clone()),
+            SingleItem(is) => SingleItemOwned(is.clone()),
+            SubTree(r) => SubTreeOwned(r.clone()),
+        }
+    }
+}
+
+static KVP_ENTRY: uint = 0b01;
+static SUBTREE_ENTRY: uint = 0b10;
+static COLLISION_ENTRY: uint = 0b11;
+
+enum NodeEntryMut<'a, K, V, IS> {
+    CollisionMut(&'a mut Arc<~[IS]>),
+    SingleItemMut(&'a mut IS),
+    SubTreeMut(&'a mut NodeRef<K, V, IS>)
+}
+
+enum NodeEntryOwned<K, V, IS> {
+    CollisionOwned(Arc<~[IS]>),
+    SingleItemOwned(IS),
+    SubTreeOwned(NodeRef<K, V, IS>)
 }
 
 enum RemovalResult<K, V, IS> {
@@ -133,46 +166,77 @@ enum RemovalResult<K, V, IS> {
     KillSubTree
 }
 
-// Clone for NodeEntry
-impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> Clone for NodeEntry<K, V, IS> {
-    fn clone(&self) -> NodeEntry<K, V, IS> {
-        match *self {
-            Collision(ref items) => Collision(items.clone()),
-            SingleItem(ref kvp) => SingleItem(kvp.clone()),
-            SubTree(ref sub) => SubTree(sub.clone()),
-        }
-    }
-}
-
 // impl UnsafeNode
 impl<K, V, IS> UnsafeNode<K, V, IS> {
+
     #[inline]
-    fn get_entry<'a>(&'a self, index: uint) -> &'a NodeEntry<K, V, IS> {
+    fn get_entry_type_code(&self, index: uint) -> uint {
+        ((self.entry_types >> (index * 2)) & 0b11) as uint
+    }
+
+    #[inline]
+    fn set_entry_type_code(&mut self, index: uint, type_code: uint) {
+        assert!(type_code <= 0b11);
+        self.entry_types = (self.entry_types & !(0b11 << (index * 2))) |
+                           (type_code as u64 << (index * 2));
+    }
+
+    #[inline]
+    fn get_entry_ptr(&self, index: uint) -> *u8 {
+        assert!(index < self.entry_count());
         unsafe {
-            assert!(index < self.entry_count());
-            let base: *NodeEntry<K, V, IS> = cast::transmute(&self.__entries);
-            let entry_ptr = base.offset(index as int);
-            cast::transmute(entry_ptr)
+            let base: *u8 = cast::transmute(&self.__entries);
+            base.offset((index * UnsafeNode::<K, V, IS>::node_entry_size()) as int)
         }
     }
 
     #[inline]
-    fn get_entry_mut<'a>(&'a mut self, index: uint) -> &'a mut NodeEntry<K, V, IS> {
+    fn get_entry<'a>(&'a self, index: uint) -> NodeEntry<'a, K, V, IS> {
+        let entry_ptr = self.get_entry_ptr(index);
+
         unsafe {
-            assert!(index < self.entry_count());
-            let base: *NodeEntry<K, V, IS> = cast::transmute(&self.__entries);
-            let entry_ptr = base.offset(index as int);
-            cast::transmute(entry_ptr)
+            match self.get_entry_type_code(index) {
+                KVP_ENTRY => SingleItem(cast::transmute(entry_ptr)),
+                SUBTREE_ENTRY => SubTree(cast::transmute(entry_ptr)),
+                COLLISION_ENTRY => Collision(cast::transmute(entry_ptr)),
+                _ => fail!("Invalid entry type code")
+            }
         }
     }
 
     #[inline]
-    fn init_entry<'a>(&mut self, index: uint, entry: NodeEntry<K, V, IS>) {
+    fn get_entry_mut<'a>(&'a mut self, index: uint) -> NodeEntryMut<'a, K, V, IS> {
+        let entry_ptr = self.get_entry_ptr(index);
+
         unsafe {
-            assert!(index < self.entry_count());
-            let base: *mut NodeEntry<K, V, IS> = cast::transmute(&self.__entries);
-            let entry_ptr: &mut NodeEntry<K, V, IS> = cast::transmute(base.offset(index as int));
-            intrinsics::move_val_init(entry_ptr, entry);
+            match self.get_entry_type_code(index) {
+                KVP_ENTRY => SingleItemMut(cast::transmute(entry_ptr)),
+                SUBTREE_ENTRY => SubTreeMut(cast::transmute(entry_ptr)),
+                COLLISION_ENTRY => CollisionMut(cast::transmute(entry_ptr)),
+                _ => fail!("Invalid entry type code")
+            }
+        }
+    }
+
+    #[inline]
+    fn init_entry<'a>(&mut self, index: uint, entry: NodeEntryOwned<K, V, IS>) {
+        let entry_ptr = self.get_entry_ptr(index);
+
+        unsafe {
+            match entry {
+                SingleItemOwned(kvp) => {
+                    intrinsics::move_val_init(cast::transmute(entry_ptr), kvp);
+                    self.set_entry_type_code(index, KVP_ENTRY);
+                }
+                SubTreeOwned(node_ref) => {
+                    intrinsics::move_val_init(cast::transmute(entry_ptr), node_ref);
+                    self.set_entry_type_code(index, SUBTREE_ENTRY);
+                }
+                CollisionOwned(arc) => {
+                    intrinsics::move_val_init(cast::transmute(entry_ptr), arc);
+                    self.set_entry_type_code(index, COLLISION_ENTRY);
+                }
+            }
         }
     }
 
@@ -181,10 +245,21 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
         bit_count(self.mask)
     }
 
+    fn node_entry_size() -> uint {
+        ::std::num::max(
+            mem::size_of::<IS>(),
+            ::std::num::max(
+                mem::size_of::<Arc<~[IS]>>(),
+                mem::size_of::<NodeRef<K, V, IS>>(),
+            )
+        )
+    }
+
     fn alloc(mask: u32, capacity: uint) -> NodeRef<K, V, IS> {
         fn size_of_zero_entry_array<K, V, IS>() -> uint {
             let node: UnsafeNode<K, V, IS> = UnsafeNode {
                 ref_count: AtomicUint::new(0),
+                entry_types: 0,
                 mask: 0,
                 capacity: 0,
                 __entries: [],
@@ -198,24 +273,25 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
             (size + align - 1) & !(align - 1)
         }
 
-        let align = mem::pref_align_of::<NodeEntry<K, V, IS>>();
+        let align = mem::pref_align_of::<AlignmentStruct<K, V, IS>>();
 
         assert!(size_of_zero_entry_array::<K, V, IS>() == 0);
         assert!(bit_count(mask) <= capacity);
         let header_size = align_to(mem::size_of::<UnsafeNode<K, V, IS>>(), align);
 
-        let node_size = header_size + capacity * mem::size_of::<NodeEntry<K, V, IS>>();
+        let node_size = header_size + capacity * UnsafeNode::<K, V, IS>::node_entry_size();
 
         unsafe {
             let node_ptr: *mut UnsafeNode<K, V, IS> = cast::transmute(exchange_malloc(node_size));
             intrinsics::move_val_init(&mut (*node_ptr).ref_count, AtomicUint::new(1));
+            intrinsics::move_val_init(&mut (*node_ptr).entry_types, 0);
             intrinsics::move_val_init(&mut (*node_ptr).mask, mask);
             intrinsics::move_val_init(&mut (*node_ptr).capacity, capacity as u8);
             NodeRef { ptr: node_ptr }
         }
     }
 
-    fn destroy(&self) {
+    fn destroy(&mut self) {
         unsafe {
             let entry_count = self.entry_count();
 
@@ -227,9 +303,19 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
         }
     }
 
-    unsafe fn drop_entry(&self, index: uint) {
+    unsafe fn drop_entry(&mut self, index: uint) {
         // destroy the contained object, trick from Rc
-        let _ = ptr::read_ptr(self.get_entry(index));
+        match self.get_entry_mut(index) {
+            SingleItemMut(item_ref) => {
+                let _ = ptr::read_ptr(ptr::to_unsafe_ptr(item_ref));
+            }
+            CollisionMut(item_ref) => {
+                let _ = ptr::read_ptr(ptr::to_unsafe_ptr(item_ref));
+            }
+            SubTreeMut(item_ref) => {
+                let _ = ptr::read_ptr(ptr::to_unsafe_ptr(item_ref));
+            }
+        }
     }
 }
 
@@ -248,19 +334,20 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         if (self.mask & (1 << local_key)) == 0 {
             // If yes, then fill it with a single-item entry
             *insertion_count = 1;
-            return self.copy_with_new_entry(local_key, SingleItem(new_kvp));
+            let new_node = self.copy_with_new_entry(local_key, SingleItemOwned(new_kvp));
+            return new_node;
         }
 
         let index = get_index(self.mask, local_key);
 
-        match *self.get_entry(index) {
-            SingleItem(ref existing_entry) => {
-                let existing_key = existing_entry.key();
+        match self.get_entry(index) {
+            SingleItem(existing_kvp_ref) => {
+                let existing_key = existing_kvp_ref.key();
 
                 if *existing_key == *new_kvp.key() {
                     *insertion_count = 0;
                     // Replace entry for the given key
-                    self.copy_with_new_entry(local_key, SingleItem(new_kvp))
+                    self.copy_with_new_entry(local_key, SingleItemOwned(new_kvp))
                 } else if level != LAST_LEVEL {
                     *insertion_count = 1;
                     // There already is an entry with different key but same hash value, so push
@@ -273,25 +360,24 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                     // 2. create the sub tree, containing the two items
                     let new_sub_tree = UnsafeNode::new_with_entries(new_kvp,
                                                                     new_hash,
-                                                                    existing_entry,
+                                                                    existing_kvp_ref,
                                                                     existing_hash,
                                                                     level + 1);
 
                     // 3. return a copy of this node with the single-item entry replaced by the new
                     // subtree entry
-                    self.copy_with_new_entry(local_key, SubTree(new_sub_tree))
+                    self.copy_with_new_entry(local_key, SubTreeOwned(new_sub_tree))
                 } else {
                     *insertion_count = 1;
                     // If we have already exhausted all bits from the hash value, put everything in
                     // collision node
-                    let items = ~[new_kvp, existing_entry.clone()];
-                    let collision_entry = Collision(Arc::new(items));
-                    self.copy_with_new_entry(local_key, collision_entry)
+                    let items = ~[new_kvp, existing_kvp_ref.clone()];
+                    self.copy_with_new_entry(local_key, CollisionOwned(Arc::new(items)))
                 }
             }
-            Collision(ref items) => {
+            Collision(items_ref) => {
                 assert!(level == LAST_LEVEL);
-                let items = items.get();
+                let items = items_ref.get();
                 let position = items.iter().position(|kvp2| *kvp2.key() == *new_kvp.key());
 
                 let new_items = match position {
@@ -324,15 +410,15 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                     }
                 };
 
-                self.copy_with_new_entry(local_key, Collision(Arc::new(new_items)))
+                self.copy_with_new_entry(local_key, CollisionOwned(Arc::new(new_items)))
             }
-            SubTree(ref sub_tree) => {
-                let new_sub_tree = sub_tree.borrow().insert(hash >> BITS_PER_LEVEL,
-                                                            level + 1,
-                                                            new_kvp,
-                                                            insertion_count);
+            SubTree(sub_tree_ref) => {
+                let new_sub_tree = sub_tree_ref.borrow().insert(hash >> BITS_PER_LEVEL,
+                                                                level + 1,
+                                                                new_kvp,
+                                                                insertion_count);
 
-                self.copy_with_new_entry(local_key, SubTree(new_sub_tree))
+                self.copy_with_new_entry(local_key, SubTreeOwned(new_sub_tree))
             }
         }
     }
@@ -354,20 +440,20 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         if (self.mask & (1 << local_key)) == 0 {
             // If yes, then fill it with a single-item entry
             *insertion_count = 1;
-            self.insert_entry_in_place(local_key, SingleItem(new_kvp));
+            self.insert_entry_in_place(local_key, SingleItemOwned(new_kvp));
             return None;
         }
 
         let index = get_index(self.mask, local_key);
 
-        let new_entry = match *self.get_entry_mut(index) {
-            SingleItem(ref existing_entry) => {
-                let existing_key = existing_entry.key();
+        let new_entry = match self.get_entry_mut(index) {
+            SingleItemMut(existing_kvp_ref) => {
+                let existing_key = existing_kvp_ref.key();
 
                 if *existing_key == *new_kvp.key() {
                     *insertion_count = 0;
                     // Replace entry for the given key
-                    Some(SingleItem(new_kvp))
+                    Some(SingleItemOwned(new_kvp))
                 } else if level != LAST_LEVEL {
                     *insertion_count = 1;
                     // There already is an entry with different key but same hash value, so push
@@ -380,25 +466,25 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                     // 2. create the sub tree, containing the two items
                     let new_sub_tree = UnsafeNode::new_with_entries(new_kvp,
                                                                     new_hash,
-                                                                    existing_entry,
+                                                                    existing_kvp_ref,
                                                                     existing_hash,
                                                                     level + 1);
 
                     // 3. return a copy of this node with the single-item entry replaced by the new
                     // subtree entry
-                    Some(SubTree(new_sub_tree))
+                    Some(SubTreeOwned(new_sub_tree))
                 } else {
                     *insertion_count = 1;
                     // If we have already exhausted all bits from the hash value, put everything in
                     // collision node
-                    let items = ~[new_kvp, existing_entry.clone()];
-                    let collision_entry = Collision(Arc::new(items));
+                    let items = ~[new_kvp, existing_kvp_ref.clone()];
+                    let collision_entry = CollisionOwned(Arc::new(items));
                     Some(collision_entry)
                 }
             }
-            Collision(ref items) => {
+            CollisionMut(items_ref) => {
                 assert!(level == LAST_LEVEL);
-                let items = items.get();
+                let items = items_ref.get();
                 let position = items.iter().position(|kvp2| *kvp2.key() == *new_kvp.key());
 
                 let new_items = match position {
@@ -431,12 +517,12 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                     }
                 };
 
-                Some(Collision(Arc::new(new_items)))
+                Some(CollisionOwned(Arc::new(new_items)))
             }
-            SubTree(ref mut subtree_ref) => {
-                match subtree_ref.try_borrow_owned() {
+            SubTreeMut(subtree_mut_ref) => {
+                match subtree_mut_ref.try_borrow_owned() {
                     SharedNode(subtree) => {
-                        Some(SubTree(subtree.insert(hash >> BITS_PER_LEVEL,
+                        Some(SubTreeOwned(subtree.insert(hash >> BITS_PER_LEVEL,
                                                          level + 1,
                                                          new_kvp,
                                                          insertion_count)))
@@ -446,7 +532,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                                                           level + 1,
                                                           new_kvp.clone(),
                                                           insertion_count) {
-                            Some(new_sub_tree) => Some(SubTree(new_sub_tree)),
+                            Some(new_sub_tree) => Some(SubTreeOwned(new_sub_tree)),
                             None => None
                         }
                     }
@@ -483,9 +569,9 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
 
         let index = get_index(self.mask, local_key);
 
-        match *self.get_entry(index) {
-            SingleItem(ref existing_kvp) => {
-                if *existing_kvp.key() == *key {
+        match self.get_entry(index) {
+            SingleItem(existing_kvp_ref) => {
+                if *existing_kvp_ref.key() == *key {
                     *removal_count = 1;
                     self.collapse_kill_or_change(local_key, index)
                 } else {
@@ -493,9 +579,9 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                     NoChange
                 }
             }
-            Collision(ref items) => {
+            Collision(items_ref) => {
                 assert!(level == LAST_LEVEL);
-                let items = items.get();
+                let items = items_ref.get();
                 let position = items.iter().position(|kvp| *kvp.key() == *key);
 
                 match position {
@@ -520,14 +606,14 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                             }
                             assert!(new_items.len() == item_count);
 
-                            Collision(Arc::new(new_items))
+                            CollisionOwned(Arc::new(new_items))
                         } else {
                             assert!(items.len() == 2);
                             assert!(position == 0 || position == 1);
                             let index_of_remaining_item = 1 - position;
                             let kvp = items[index_of_remaining_item].clone();
 
-                            SingleItem(kvp)
+                            SingleItemOwned(kvp)
                         };
 
                         let new_sub_tree = self.copy_with_new_entry(local_key, new_entry);
@@ -535,21 +621,21 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                     }
                 }
             }
-            SubTree(ref sub_tree) => {
-                let result = sub_tree.borrow().remove(hash >> BITS_PER_LEVEL,
-                                                      level + 1,
-                                                      key,
-                                                      removal_count);
+            SubTree(sub_tree_ref) => {
+                let result = sub_tree_ref.borrow().remove(hash >> BITS_PER_LEVEL,
+                                                          level + 1,
+                                                          key,
+                                                          removal_count);
                 match result {
                     NoChange => NoChange,
                     ReplaceSubTree(x) => {
-                        ReplaceSubTree(self.copy_with_new_entry(local_key, SubTree(x)))
+                        ReplaceSubTree(self.copy_with_new_entry(local_key, SubTreeOwned(x)))
                     }
                     CollapseSubTree(kvp) => {
                         if bit_count(self.mask) == 1 {
                             CollapseSubTree(kvp)
                         } else {
-                            ReplaceSubTree(self.copy_with_new_entry(local_key, SingleItem(kvp)))
+                            ReplaceSubTree(self.copy_with_new_entry(local_key, SingleItemOwned(kvp)))
                         }
                     },
                     KillSubTree => {
@@ -570,9 +656,9 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         } else if next_entry_count == 1 {
             let other_index = 1 - entry_index;
 
-            match *self.get_entry(other_index) {
-                SingleItem(ref kvp) => {
-                    CollapseSubTree(kvp.clone())
+            match self.get_entry(other_index) {
+                SingleItem(kvp_ref) => {
+                    CollapseSubTree(kvp_ref.clone())
                 }
                 _ => ReplaceSubTree(self.copy_without_entry(local_key))
             }
@@ -584,7 +670,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
 
     fn copy_with_new_entry(&self,
                            local_key: uint,
-                           new_entry: NodeEntry<K, V, IS>)
+                           new_entry: NodeEntryOwned<K, V, IS>)
                         -> NodeRef<K, V, IS> {
         let replace_old_entry = (self.mask & (1 << local_key)) != 0;
         let new_mask: u32 = self.mask | (1 << local_key);
@@ -600,7 +686,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
 
             // Copy up to index
             while old_i < index {
-                new_node.init_entry(new_i, self.get_entry(old_i).clone());
+                new_node.init_entry(new_i, self.get_entry(old_i).clone_out());
                 old_i += 1;
                 new_i += 1;
             }
@@ -616,7 +702,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
 
             // Copy the rest
             while old_i < self.entry_count() {
-                new_node.init_entry(new_i, self.get_entry(old_i).clone());
+                new_node.init_entry(new_i, self.get_entry(old_i).clone_out());
                 old_i += 1;
                 new_i += 1;
             }
@@ -638,7 +724,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
 
     fn insert_entry_in_place(&mut self,
                              local_key: uint,
-                             new_entry: NodeEntry<K, V, IS>) {
+                             new_entry: NodeEntryOwned<K, V, IS>) {
         let new_mask: u32 = self.mask | (1 << local_key);
         let replace_old_entry = (new_mask == self.mask);
         let index = get_index(new_mask, local_key);
@@ -654,10 +740,17 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
             // make place for new entry:
             unsafe {
                 if index < self.entry_count() {
-                    let source = ptr::to_unsafe_ptr(self.get_entry(index));
-                    let dest = cast::transmute_mut_unsafe(source.offset(1));
-                    let count = self.entry_count() - index;
+                    let source: *u8 = self.get_entry_ptr(index);
+                    let dest: *mut u8 = cast::transmute_mut_unsafe(
+                        source.offset(UnsafeNode::<K, V, IS>::node_entry_size() as int));
+                    let count = (self.entry_count() - index) *
+                        UnsafeNode::<K, V, IS>::node_entry_size();
                     ptr::copy_memory(dest, source, count);
+
+                    // fail!("Adapt type_kind_mask");
+                    let type_mask_up_to_index: u64 = 0xFFFFFFFFFFFFFFFF << ((index + 1) * 2);
+                    self.entry_types = ((self.entry_types << 2) & type_mask_up_to_index) |
+                                       (self.entry_types & !type_mask_up_to_index);
                 }
             }
 
@@ -690,7 +783,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
 
             // Copy up to index
             while old_i < index {
-                new_node.init_entry(new_i, self.get_entry(old_i).clone());
+                new_node.init_entry(new_i, self.get_entry(old_i).clone_out());
                 old_i += 1;
                 new_i += 1;
             }
@@ -699,7 +792,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
 
             // Copy the rest
             while old_i < self.entry_count() {
-                new_node.init_entry(new_i, self.get_entry(old_i).clone());
+                new_node.init_entry(new_i, self.get_entry(old_i).clone_out());
                 old_i += 1;
                 new_i += 1;
             }
@@ -709,23 +802,23 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         return new_node_ref;
     }
 
-    fn remove_entry_in_place(&mut self, local_key: uint) {
-        assert!((self.mask & (1 << local_key)) != 0);
+    // fn remove_entry_in_place(&mut self, local_key: uint) {
+        // assert!((self.mask & (1 << local_key)) != 0);
 
-        let new_mask = self.mask & !(1 << local_key);
-        let index = get_index(self.mask, local_key);
+    //     let new_mask = self.mask & !(1 << local_key);
+    //     let index = get_index(self.mask, local_key);
 
-        unsafe {
-            self.drop_entry(index);
+    //     unsafe {
+    //         self.drop_entry(index);
 
-            let source = ptr::to_unsafe_ptr(self.get_entry(index + 1));
-            let dest = cast::transmute_mut_unsafe(source.offset(-1));
-            let count = self.entry_count() - (index + 1);
-            ptr::copy_memory(dest, source, count);
-        }
+    //         let source = ptr::to_unsafe_ptr(self.get_entry(index + 1));
+    //         let dest = cast::transmute_mut_unsafe(source.offset(-1));
+    //         let count = self.entry_count() - (index + 1);
+    //         ptr::copy_memory(dest, source, count);
+    //     }
 
-        self.mask = new_mask;
-    }
+    //     self.mask = new_mask;
+    // }
 
     fn new_with_entries(new_kvp: IS,
                         new_hash: u64,
@@ -745,11 +838,11 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                 let new_node = new_node_ref.borrow_mut();
 
                 if new_local_key < existing_local_key {
-                    new_node.init_entry(0, SingleItem(new_kvp));
-                    new_node.init_entry(1, SingleItem(existing_kvp.clone()));
+                    new_node.init_entry(0, SingleItemOwned(new_kvp));
+                    new_node.init_entry(1, SingleItemOwned(existing_kvp.clone()));
                 } else {
-                    new_node.init_entry(0, SingleItem(existing_kvp.clone()));
-                    new_node.init_entry(1, SingleItem(new_kvp));
+                    new_node.init_entry(0, SingleItemOwned(existing_kvp.clone()));
+                    new_node.init_entry(1, SingleItemOwned(new_kvp));
                 };
             }
             new_node_ref
@@ -758,7 +851,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
             let mut new_node_ref = UnsafeNode::alloc(mask, MIN_CAPACITY);
             {
                 let new_node = new_node_ref.borrow_mut();
-                new_node.init_entry(0, Collision(Arc::new(~[new_kvp, existing_kvp.clone()])));
+                new_node.init_entry(0, CollisionOwned(Arc::new(~[new_kvp, existing_kvp.clone()])));
             }
             new_node_ref
         } else {
@@ -772,7 +865,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
             let mut new_node_ref = UnsafeNode::alloc(mask, MIN_CAPACITY);
             {
                 let new_node = new_node_ref.borrow_mut();
-                new_node.init_entry(0, SubTree(sub_tree));
+                new_node.init_entry(0, SubTreeOwned(sub_tree));
             }
             new_node_ref
         }
@@ -803,35 +896,35 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V> + Send + Freeze
         let mut hash = key.hash();
 
         let mut level = 0;
-        let mut current_node = &self.root;
+        let mut current_node = self.root.borrow();
 
         loop {
             assert!(level <= LAST_LEVEL);
             let local_key = (hash & LEVEL_BIT_MASK) as uint;
 
-            if (current_node.borrow().mask & (1 << local_key)) == 0 {
+            if (current_node.mask & (1 << local_key)) == 0 {
                 return None;
             }
 
-            let index = get_index(current_node.borrow().mask, local_key);
+            let index = get_index(current_node.mask, local_key);
 
-            match *current_node.borrow().get_entry(index) {
-                SingleItem(ref kvp) => return if *key == *kvp.key() {
-                    Some(kvp.val())
+            match current_node.get_entry(index) {
+                SingleItem(kvp_ref) => return if *key == *kvp_ref.key() {
+                    Some(kvp_ref.val())
                 } else {
                     None
                 },
-                Collision(ref items) => {
+                Collision(items_ref) => {
                     assert!(level == LAST_LEVEL);
-                    let found = items.get().iter().find(|&kvp| *key == *kvp.key());
+                    let found = items_ref.get().iter().find(|&kvp| *key == *kvp.key());
                     return match found {
                         Some(kvp) => Some(kvp.val()),
                         None => None,
                     };
                 }
-                SubTree(ref sub) => {
+                SubTree(subtree_ref) => {
                     assert!(level < LAST_LEVEL);
-                    current_node = sub;
+                    current_node = subtree_ref.borrow();
                     hash = hash >> BITS_PER_LEVEL;
                     level += 1;
                 }
@@ -891,7 +984,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V> + Send + Freeze
                 let mut root_ref = UnsafeNode::alloc(mask, MIN_CAPACITY);
                 {
                     let root = root_ref.borrow_mut();
-                    root.init_entry(0, SingleItem(kvp));
+                    root.init_entry(0, SingleItemOwned(kvp));
                 }
                 HamtMap {
                     root: root_ref,
