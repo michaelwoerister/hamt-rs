@@ -48,7 +48,6 @@ enum NodeRefBorrowResult<'a, K, V, IS> {
 }
 
 impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> NodeRef<K, V, IS> {
-    #[inline]
     fn borrow<'a>(&'a self) -> &'a UnsafeNode<K, V, IS> {
         unsafe {
             cast::transmute(self.ptr)
@@ -169,19 +168,16 @@ enum RemovalResult<K, V, IS> {
 // impl UnsafeNode
 impl<K, V, IS> UnsafeNode<K, V, IS> {
 
-    #[inline]
     fn get_entry_type_code(&self, index: uint) -> uint {
         ((self.entry_types >> (index * 2)) & 0b11) as uint
     }
 
-    #[inline]
     fn set_entry_type_code(&mut self, index: uint, type_code: uint) {
         assert!(type_code <= 0b11);
         self.entry_types = (self.entry_types & !(0b11 << (index * 2))) |
                            (type_code as u64 << (index * 2));
     }
 
-    #[inline]
     fn get_entry_ptr(&self, index: uint) -> *u8 {
         assert!(index < self.entry_count());
         unsafe {
@@ -190,7 +186,6 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
         }
     }
 
-    #[inline]
     fn get_entry<'a>(&'a self, index: uint) -> NodeEntry<'a, K, V, IS> {
         let entry_ptr = self.get_entry_ptr(index);
 
@@ -204,7 +199,6 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
         }
     }
 
-    #[inline]
     fn get_entry_mut<'a>(&'a mut self, index: uint) -> NodeEntryMut<'a, K, V, IS> {
         let entry_ptr = self.get_entry_ptr(index);
 
@@ -218,7 +212,6 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
         }
     }
 
-    #[inline]
     fn init_entry<'a>(&mut self, index: uint, entry: NodeEntryOwned<K, V, IS>) {
         let entry_ptr = self.get_entry_ptr(index);
 
@@ -240,7 +233,6 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
         }
     }
 
-    #[inline]
     fn entry_count(&self) -> uint {
         bit_count(self.mask)
     }
@@ -256,6 +248,7 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
     }
 
     fn alloc(mask: u32, capacity: uint) -> NodeRef<K, V, IS> {
+        assert!(size_of_zero_entry_array::<K, V, IS>() == 0);
         fn size_of_zero_entry_array<K, V, IS>() -> uint {
             let node: UnsafeNode<K, V, IS> = UnsafeNode {
                 ref_count: AtomicUint::new(0),
@@ -267,18 +260,17 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
 
             mem::size_of_val(&node.__entries)
         }
-        #[inline]
+
         fn align_to(size: uint, align: uint) -> uint {
             assert!(align != 0 && bit_count(align as u32) == 1);
             (size + align - 1) & !(align - 1)
         }
 
         let align = mem::pref_align_of::<AlignmentStruct<K, V, IS>>();
+        let entry_count = bit_count(mask);
+        assert!(entry_count <= capacity);
 
-        assert!(size_of_zero_entry_array::<K, V, IS>() == 0);
-        assert!(bit_count(mask) <= capacity);
         let header_size = align_to(mem::size_of::<UnsafeNode<K, V, IS>>(), align);
-
         let node_size = header_size + capacity * UnsafeNode::<K, V, IS>::node_entry_size();
 
         unsafe {
@@ -649,11 +641,11 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
     // Determines how the parent node should handle the removal of the entry at local_key from this
     // node.
     fn collapse_kill_or_change(&self, local_key: uint, entry_index: uint) -> RemovalResult<K, V, IS> {
-        let next_entry_count = bit_count(self.mask) - 1;
+        let new_entry_count = bit_count(self.mask) - 1;
 
-        if next_entry_count > 1 {
+        if new_entry_count > 1 {
             ReplaceSubTree(self.copy_without_entry(local_key))
-        } else if next_entry_count == 1 {
+        } else if new_entry_count == 1 {
             let other_index = 1 - entry_index;
 
             match self.get_entry(other_index) {
@@ -663,7 +655,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                 _ => ReplaceSubTree(self.copy_without_entry(local_key))
             }
         } else {
-            assert!(next_entry_count == 0);
+            assert!(new_entry_count == 0);
             KillSubTree
         }
     }
@@ -707,7 +699,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                 new_i += 1;
             }
 
-            assert!(new_i == bit_count(new_mask));
+            assert!(new_i == new_node.entry_count() as uint);
         }
 
         return new_node_ref;
@@ -718,7 +710,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         if (self.mask & bit) != 0 {
             true
         } else {
-            self.entry_count() < (self.capacity as uint)
+            self.entry_count() < self.capacity as uint
         }
     }
 
@@ -747,7 +739,6 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                         UnsafeNode::<K, V, IS>::node_entry_size();
                     ptr::copy_memory(dest, source, count);
 
-                    // fail!("Adapt type_kind_mask");
                     let type_mask_up_to_index: u64 = 0xFFFFFFFFFFFFFFFF << ((index + 1) * 2);
                     self.entry_types = ((self.entry_types << 2) & type_mask_up_to_index) |
                                        (self.entry_types & !type_mask_up_to_index);
@@ -803,7 +794,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
     }
 
     // fn remove_entry_in_place(&mut self, local_key: uint) {
-        // assert!((self.mask & (1 << local_key)) != 0);
+     // assert!((self.mask & (1 << local_key)) != 0);
 
     //     let new_mask = self.mask & !(1 << local_key);
     //     let index = get_index(self.mask, local_key);
@@ -934,13 +925,13 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V> + Send + Freeze
 
     fn insert_internal(mut self, kvp: IS) -> (HamtMap<K, V, IS>, bool) {
         let hash = kvp.key().hash();
-        let mut num_of_additions = 0xdeadbeaf;
+        let mut insertion_count = 0xdeadbeaf;
         let element_count = self.element_count;
 
         // If we hold the only reference to the root node, then try to insert the KVP in-place
         let new_root = match self.root.try_borrow_owned() {
-            OwnedNode(mutable) => mutable.try_insert_in_place(hash, 0, kvp, &mut num_of_additions),
-            SharedNode(immutable) => Some(immutable.insert(hash, 0, kvp, &mut num_of_additions))
+            OwnedNode(mutable) => mutable.try_insert_in_place(hash, 0, kvp, &mut insertion_count),
+            SharedNode(immutable) => Some(immutable.insert(hash, 0, kvp, &mut insertion_count))
         };
 
         let new_root = match new_root {
@@ -948,15 +939,15 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V> + Send + Freeze
             None => self.root
         };
 
-        // Make sure that new_entry_count was set properly
-        assert!(num_of_additions != 0xdeadbeaf);
+        // Make sure that insertion_count was set properly
+        assert!(insertion_count != 0xdeadbeaf);
 
         (
             HamtMap {
                 root: new_root,
-                element_count: element_count + num_of_additions
+                element_count: element_count + insertion_count
             },
-            num_of_additions != 0
+            insertion_count != 0
         )
     }
 
@@ -1003,7 +994,6 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V> + Send + Freeze
 impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone, IS: ItemStore<K, V>>
 Clone for HamtMap<K, V, IS> {
 
-    #[inline]
     fn clone(&self) -> HamtMap<K, V, IS> {
         HamtMap { root: self.root.clone(), element_count: self.element_count }
     }
@@ -1013,7 +1003,6 @@ Clone for HamtMap<K, V, IS> {
 impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone, IS: ItemStore<K, V>>
 Container for HamtMap<K, V, IS> {
 
-    #[inline]
     fn len(&self) -> uint {
         self.element_count
     }
@@ -1023,7 +1012,6 @@ Container for HamtMap<K, V, IS> {
 impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone, IS: ItemStore<K, V>>
 Map<K, V> for HamtMap<K, V, IS> {
 
-    #[inline]
     fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
         self.find(key)
     }
@@ -1033,12 +1021,10 @@ Map<K, V> for HamtMap<K, V, IS> {
 impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone>
 PersistentMap<K, V> for HamtMap<K, V, CopyStore<K, V>> {
 
-    #[inline]
     fn insert(self, key: K, value: V) -> (HamtMap<K, V, CopyStore<K, V>>, bool) {
         self.insert_internal(CopyStore { key: key, val: value })
     }
 
-    #[inline]
     fn remove(self, key: &K) -> (HamtMap<K, V, CopyStore<K, V>>, bool) {
         self.remove_internal(key)
     }
@@ -1048,12 +1034,10 @@ PersistentMap<K, V> for HamtMap<K, V, CopyStore<K, V>> {
 impl<K: Hash+Eq+Send+Freeze+Clone, V: Send+Freeze+Clone>
 PersistentMap<K, V> for HamtMap<K, V, ShareStore<K, V>> {
 
-    #[inline]
     fn insert(self, key: K, value: V) -> (HamtMap<K, V, ShareStore<K, V>>, bool) {
         self.insert_internal(ShareStore::new(key,value))
     }
 
-    #[inline]
     fn remove(self, key: &K) -> (HamtMap<K, V, ShareStore<K, V>>, bool) {
         self.remove_internal(key)
     }
@@ -1061,8 +1045,7 @@ PersistentMap<K, V> for HamtMap<K, V, ShareStore<K, V>> {
 
 //=-------------------------------------------------------------------------------------------------
 // Utility functions
-//=-------------------------------------------------------------------------------------------------
-#[inline]
+//=------------------------------------------------------------------------------------------------
 fn get_index(mask: u32, index: uint) -> uint {
     assert!((mask & (1 << index)) != 0);
 
@@ -1071,8 +1054,6 @@ fn get_index(mask: u32, index: uint) -> uint {
 
     bit_count(masked)
 }
-
-#[inline]
 fn bit_count(x: u32) -> uint {
     unsafe {
         intrinsics::ctpop32(cast::transmute(x)) as uint
