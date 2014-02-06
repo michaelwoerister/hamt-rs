@@ -29,7 +29,6 @@
 extern mod extra;
 extern mod sync;
 
-pub mod persistent;
 pub mod hamt;
 pub mod rbtree;
 
