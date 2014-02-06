@@ -30,7 +30,7 @@ use std::unstable::intrinsics;
 use std::sync::atomics::{AtomicUint, Acquire, Release};
 use std::rt::global_heap::{exchange_malloc, exchange_free};
 
-use extra::arc::Arc;
+use sync::Arc;
 use persistent::PersistentMap;
 use item_store::{ItemStore, CopyStore, ShareStore};
 

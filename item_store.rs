@@ -1,5 +1,5 @@
 
-use extra::arc::Arc;
+use sync::Arc;
 
 pub trait ItemStore<K, V>: Clone+Send+Freeze {
     fn key<'a>(&'a self) -> &'a K;
