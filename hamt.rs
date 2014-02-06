@@ -18,9 +18,11 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-// Hash Array Mapped Trie Implementation
-// Based on "Ideal Hash Trees" by Phil Bagwell:
-// http://lampwww.epfl.ch/papers/idealhashtrees.pdf
+//! A Hash Array Mapped Trie implementation based on the
+//! [Ideal Hash Trees](http://lampwww.epfl.ch/papers/idealhashtrees.pdf) paper by Phil Bagwell.
+//! This is the datastructure used by Scala's and Clojure's standard library as map implementation.
+//! The idea to use a special *collision node* to deal with hash collisions is taken from Clojure's
+//! implementation.
 
 use std::cast;
 use std::mem;
@@ -31,23 +33,28 @@ use std::sync::atomics::{AtomicUint, Acquire, Release};
 use std::rt::global_heap::{exchange_malloc, exchange_free};
 
 use sync::Arc;
-use persistent::PersistentMap;
+use PersistentMap;
 use item_store::{ItemStore, CopyStore, ShareStore};
 
 
 //=-------------------------------------------------------------------------------------------------
 // NodeRef
 //=-------------------------------------------------------------------------------------------------
+// A smart pointer dealing for handling node lifetimes, very similar to sync::Arc.
 struct NodeRef<K, V, IS> {
     ptr: *mut UnsafeNode<K, V, IS>
 }
 
+// NodeRef knows if it is the only reference to a given node and can thus safely decide to allow for
+// mutable access to the referenced node. This type indicates whether mutable access could be
+// acquired.
 enum NodeRefBorrowResult<'a, K, V, IS> {
     OwnedNode(&'a mut UnsafeNode<K, V, IS>),
     SharedNode(&'a UnsafeNode<K, V, IS>),
 }
 
 impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> NodeRef<K, V, IS> {
+
     fn borrow<'a>(&'a self) -> &'a UnsafeNode<K, V, IS> {
         unsafe {
             cast::transmute(self.ptr)
@@ -61,6 +68,8 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> NodeRef<K, V, 
         }
     }
 
+    // Try to safely gain mutable access to the referenced node. This can be used to safely make
+    // in-place modifications instead of unnecessarily copying data.
     fn try_borrow_owned<'a>(&'a mut self) -> NodeRefBorrowResult<'a, K, V, IS> {
         unsafe {
             if (*self.ptr).ref_count.load(Acquire) == 1 {
@@ -103,32 +112,59 @@ impl<K, V, IS> Clone for NodeRef<K, V, IS> {
 //=-------------------------------------------------------------------------------------------------
 // UnsafeNode
 //=-------------------------------------------------------------------------------------------------
+// The number of hash-value bits used per tree-level.
 static BITS_PER_LEVEL: uint = 5;
+// The deepest level the tree can have. Collision-nodes are use at this depth to avoid any further
+// recursion.
 static LAST_LEVEL: uint = (64 / BITS_PER_LEVEL) - 1;
+// Used to mask off any unused bits from the hash key at a given level.
 static LEVEL_BIT_MASK: u64 = (1 << BITS_PER_LEVEL) - 1;
+// The minimum node capacity.
 static MIN_CAPACITY: uint = 4;
 
+// This struct should have the correct alignment for node entries.
 struct AlignmentStruct<K, V, IS> {
     a: Arc<~[IS]>,
     b: IS,
     c: NodeRef<K, V, IS>
 }
 
+// Bit signature of node entry types. Every node contains a single u64 designating the kinds of all
+// its entries, which can either be a key-value pair, a reference to a sub-tree, or a
+// collision-entry, containing a linear list of colliding key-value pairs.
+static KVP_ENTRY: uint = 0b01;
+static SUBTREE_ENTRY: uint = 0b10;
+static COLLISION_ENTRY: uint = 0b11;
+static INVALID_ENTRY: uint = 0b00;
+
+// The central node type used by the implementation. Note that this struct just represents the
+// header of the node data. The actual entries are allocated directly after this header, starting
+// at the address of the `__entries` field.
 struct UnsafeNode<K, V, IS> {
+    // The current number of references to this node.
     ref_count: AtomicUint,
+    // The entry types of the of this node. Each two bits encode the type of one entry
+    // (key-value pair, subtree ref, or collision entry). See get_entry_type_code() and the above
+    // constants to learn about the encoding.
     entry_types: u64,
+    // A mask stating at which local keys (an integer between 0 and 31) an entry is exists.
     mask: u32,
+    // The maximum number of entries this node can store.
     capacity: u8,
+    // An artificial field ensuring the correct alignment of entries behind this header.
     __entries: [AlignmentStruct<K, V, IS>, ..0],
 }
 
-enum NodeEntry<'a, K, V, IS> {
+// A temporary reference to a node entries content. This is a safe wrapper around the unsafe,
+// low-level bitmask-based memory representation of node entries.
+enum NodeEntryRef<'a, K, V, IS> {
     Collision(&'a Arc<~[IS]>),
     SingleItem(&'a IS),
     SubTree(&'a NodeRef<K, V, IS>)
 }
 
-impl<'a, K: Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> NodeEntry<'a, K, V, IS> {
+impl<'a, K: Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> NodeEntryRef<'a, K, V, IS> {
+    // Clones the contents of a NodeEntryRef into a NodeEntryOwned value to be used elsewhere.
     fn clone_out(&self) -> NodeEntryOwned<K, V, IS> {
         match *self {
             Collision(r) => CollisionOwned(r.clone()),
@@ -138,22 +174,24 @@ impl<'a, K: Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> NodeEntry<'a, K, V
     }
 }
 
-static KVP_ENTRY: uint = 0b01;
-static SUBTREE_ENTRY: uint = 0b10;
-static COLLISION_ENTRY: uint = 0b11;
-
-enum NodeEntryMut<'a, K, V, IS> {
+// The same as NodeEntryRef but allowing for mutable access to the referenced node entry.
+enum NodeEntryMutRef<'a, K, V, IS> {
     CollisionMut(&'a mut Arc<~[IS]>),
     SingleItemMut(&'a mut IS),
     SubTreeMut(&'a mut NodeRef<K, V, IS>)
 }
 
+// Similar to NodeEntryRef, but actually owning the entry data, so it can be moved around.
 enum NodeEntryOwned<K, V, IS> {
     CollisionOwned(Arc<~[IS]>),
     SingleItemOwned(IS),
     SubTreeOwned(NodeRef<K, V, IS>)
 }
 
+// This datatype is used to communicate between consecutive tree-levels about what to do when
+// a change has occured below. When removing something from a subtree it sometimes makes sense to
+// remove the entire subtree and replace it with a directly contained key-value pair in order to
+// safe space and---later on during searches---time.
 enum RemovalResult<K, V, IS> {
     // Don't do anything
     NoChange,
@@ -168,16 +206,25 @@ enum RemovalResult<K, V, IS> {
 // impl UnsafeNode
 impl<K, V, IS> UnsafeNode<K, V, IS> {
 
+    // Retrieve the type code of the entry with the given index. Is always one of
+    // {KVP_ENTRY, SUBTREE_ENTRY, COLLISION_ENTRY}
     fn get_entry_type_code(&self, index: uint) -> uint {
-        ((self.entry_types >> (index * 2)) & 0b11) as uint
+        assert!(index < self.entry_count());
+        let type_code = ((self.entry_types >> (index * 2)) & 0b11) as uint;
+        assert!(type_code != INVALID_ENTRY);
+        type_code
     }
 
+    // Set the type code of the entry with the given index. Must be one of
+    // {KVP_ENTRY, SUBTREE_ENTRY, COLLISION_ENTRY}
     fn set_entry_type_code(&mut self, index: uint, type_code: uint) {
-        assert!(type_code <= 0b11);
+        assert!(index < self.entry_count());
+        assert!(type_code <= 0b11 && type_code != INVALID_ENTRY);
         self.entry_types = (self.entry_types & !(0b11 << (index * 2))) |
                            (type_code as u64 << (index * 2));
     }
 
+    // Get a raw pointer the an entry.
     fn get_entry_ptr(&self, index: uint) -> *u8 {
         assert!(index < self.entry_count());
         unsafe {
@@ -186,7 +233,8 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
         }
     }
 
-    fn get_entry<'a>(&'a self, index: uint) -> NodeEntry<'a, K, V, IS> {
+    // Get a temporary, readonly reference to a node entry.
+    fn get_entry<'a>(&'a self, index: uint) -> NodeEntryRef<'a, K, V, IS> {
         let entry_ptr = self.get_entry_ptr(index);
 
         unsafe {
@@ -199,7 +247,8 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
         }
     }
 
-    fn get_entry_mut<'a>(&'a mut self, index: uint) -> NodeEntryMut<'a, K, V, IS> {
+    // Get a temporary, mutable reference to a node entry.
+    fn get_entry_mut<'a>(&'a mut self, index: uint) -> NodeEntryMutRef<'a, K, V, IS> {
         let entry_ptr = self.get_entry_ptr(index);
 
         unsafe {
@@ -212,6 +261,8 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
         }
     }
 
+    // Initialize the entry with the given data. This will set the correct type code for the entry
+    // move the given value to the correct memory position. It will not modify the nodes entry mask.
     fn init_entry<'a>(&mut self, index: uint, entry: NodeEntryOwned<K, V, IS>) {
         let entry_ptr = self.get_entry_ptr(index);
 
@@ -233,10 +284,12 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
         }
     }
 
+    // The current number of entries stored in the node. Always <= the node's capacity.
     fn entry_count(&self) -> uint {
         bit_count(self.mask)
     }
 
+    // The size in bytes of one node entry, containing any necessary padding bytes.
     fn node_entry_size() -> uint {
         ::std::num::max(
             mem::size_of::<IS>(),
@@ -247,6 +300,10 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
         )
     }
 
+    // Allocates a new node instance with the given mask and capacity. The memory for the node is
+    // allocated from the exchange heap. The capacity of the node is fixed here on after.
+    // The entries (including the entry_types bitfield) is not initialized by this call. Entries
+    // must be initialized properly with init_entry() after allocation.
     fn alloc(mask: u32, capacity: uint) -> NodeRef<K, V, IS> {
         assert!(size_of_zero_entry_array::<K, V, IS>() == 0);
         fn size_of_zero_entry_array<K, V, IS>() -> uint {
@@ -283,11 +340,11 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
         }
     }
 
+    // Destroy the given node by first `dropping` all contained entries and then free the node's
+    // memory.
     fn destroy(&mut self) {
         unsafe {
-            let entry_count = self.entry_count();
-
-            for i in range(0, entry_count) {
+            for i in range(0, self.entry_count()) {
                 self.drop_entry(i)
             }
 
@@ -295,6 +352,8 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
         }
     }
 
+    // Drops a single entry. Does not modify the entry_types or mask field of the node, just calls
+    // the destructor of the entry at the given index.
     unsafe fn drop_entry(&mut self, index: uint) {
         // destroy the contained object, trick from Rc
         match self.get_entry_mut(index) {
@@ -313,12 +372,23 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
 
 // impl UnsafeNode (continued)
 impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, V, IS> {
+    // Insert a new key-value pair into the tree. The existing tree is not modified and a new tree
+    // is created. This new tree will share most nodes with the existing one.
     fn insert(&self,
+              // The *remaining* hash value. For every level down the tree, this value is shifted
+              // to the right by `BITS_PER_LEVEL`
               hash: u64,
+              // The current level of the tree
               level: uint,
+              // The key-value pair to be inserted
               new_kvp: IS,
+              // The number of newly inserted items. Must be set to either 0 (if an existing item is
+              // replaced) or 1 (if there was not item with the given key yet). Used to keep track
+              // of the trees total item count
               insertion_count: &mut uint)
+              // Reference to the new tree containing the inserted element
            -> NodeRef<K, V, IS> {
+
         assert!(level <= LAST_LEVEL);
         let local_key = (hash & LEVEL_BIT_MASK) as uint;
 
@@ -415,6 +485,12 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         }
     }
 
+    // Same as `insert()` above, but will do the insertion in-place (i.e. without copying) if the
+    // node has enough capacity. Note, that we already have made sure at this point that there is
+    // only exactly one reference to the node (otherwise we wouldn't have `&mut self`), so it is
+    // safe to modify it in-place.
+    // If there is not enough space for a new entry, then fall back to copying via a regular call
+    // to `insert()`.
     fn try_insert_in_place(&mut self,
                            hash: u64,
                            level: uint,
@@ -425,6 +501,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         let local_key = (hash & LEVEL_BIT_MASK) as uint;
 
         if !self.can_insert_in_place(local_key) {
+            // fallback
             return Some(self.insert(hash, level, new_kvp, insertion_count));
         }
 
@@ -462,8 +539,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                                                                     existing_hash,
                                                                     level + 1);
 
-                    // 3. return a copy of this node with the single-item entry replaced by the new
-                    // subtree entry
+                    // 3. replace the SingleItem entry with the subtree entry
                     Some(SubTreeOwned(new_sub_tree))
                 } else {
                     *insertion_count = 1;
@@ -544,6 +620,8 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         return None;
     }
 
+    // Remove the item with the given key from the tree. Parameters correspond to this of
+    // `insert()`. The result tells the call (the parent level in the tree) what it should do.
     fn remove(&self,
               hash: u64,
               level: uint,
@@ -638,6 +716,9 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         }
     }
 
+    // Same as `remove()` but will do the modification in-place. As with `try_insert_in_place()` we
+    // already have made sure at this point that there is only exactly one reference to the node
+    // (otherwise we wouldn't have `&mut self`), so it is safe to modify it in-place.
     fn remove_in_place(&mut self,
                        hash: u64,
                        level: uint,
@@ -774,8 +855,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         }
     }
 
-    // Determines how the parent node should handle the removal of the entry at local_key from this
-    // node.
+    // Same as `collapse_kill_or_change()` but will do the modification in-place.
     fn collapse_kill_or_change_in_place(&mut self, local_key: uint, entry_index: uint) -> RemovalResult<K, V, IS> {
         let new_entry_count = self.entry_count() - 1;
 
@@ -800,6 +880,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         }
     }
 
+    // Copies this node with a new entry at `local_key`. Might replace an old entry.
     fn copy_with_new_entry(&self,
                            local_key: uint,
                            new_entry: NodeEntryOwned<K, V, IS>)
@@ -845,6 +926,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         return new_node_ref;
     }
 
+    // Determines whether a key-value pair can be inserted in place at the given `local_key`.
     fn can_insert_in_place(&self, local_key: uint) -> bool {
         let bit = (1 << local_key);
         if (self.mask & bit) != 0 {
@@ -854,6 +936,8 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         }
     }
 
+    // Inserts a new node entry in-place. Will take care of modifying node entry data, including the
+    // node's mask and entry_types fields.
     fn insert_entry_in_place(&mut self,
                              local_key: uint,
                              new_entry: NodeEntryOwned<K, V, IS>) {
@@ -890,6 +974,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         }
     }
 
+    // Given that the current capacity is too small, returns how big the new node should be.
     fn expanded_capacity(&self) -> uint {
         if self.capacity == 0 {
             MIN_CAPACITY
@@ -900,6 +985,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         }
     }
 
+    // Create a copy of this node which does not contain the entry at 'local_key'.
     fn copy_without_entry(&self, local_key: uint) -> NodeRef<K, V, IS> {
         assert!((self.mask & (1 << local_key)) != 0);
 
@@ -933,6 +1019,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         return new_node_ref;
     }
 
+    // Same as `copy_without_entry()` but applies the modification in place.
     fn remove_entry_in_place(&mut self, local_key: uint) {
         assert!((self.mask & (1 << local_key)) != 0);
 
@@ -960,6 +1047,8 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         self.mask = new_mask;
     }
 
+    // Creates a new node with containing the two given items and MIN_CAPACITY. Might create a
+    // whole subtree if the hash values of the two items necessitate it.
     fn new_with_entries(new_kvp: IS,
                         new_hash: u64,
                         existing_kvp: &IS,
@@ -1255,9 +1344,6 @@ mod tests {
     fn test_remove_copy() { Test::test_remove(HamtMap::<uint, uint, CopyStoreU64>::new()); }
 
     #[test]
-    fn test_random_copy() { Test::test_random(HamtMap::<uint, uint, CopyStoreU64>::new()); }
-
-    #[test]
     fn stress_test_copy() { Test::random_insert_remove_stress_test(HamtMap::<uint, uint, CopyStoreU64>::new()); }
 
 
@@ -1344,9 +1430,6 @@ mod tests {
 
     #[test]
     fn test_remove_share() { Test::test_remove(HamtMap::<uint, uint, ShareStoreU64>::new()); }
-
-    #[test]
-    fn test_random_share() { Test::test_random(HamtMap::<uint, uint, ShareStoreU64>::new()); }
 
     #[test]
     fn stress_test_share() { Test::random_insert_remove_stress_test(HamtMap::<uint, uint, ShareStoreU64>::new()); }

@@ -1,4 +1,4 @@
-// Copyright (c) 2013 Michael Woerister
+// Copyright (c) 2013, 2014 Michael Woerister
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -18,11 +18,3 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-pub trait PersistentMap<K: Send+Freeze, V: Send+Freeze>: Map<K, V> + Clone {
-    /// Insert a key-value pair into the map. An existing value for a
-    /// key is replaced by the new value. Return true if the maps element count changed.
-    fn insert(self, key: K, value: V) -> (Self, bool);
-
-    /// Remove a key-value pair from the map. Return true if the maps element count changed.
-    fn remove(self, key: &K) -> (Self, bool);
-}

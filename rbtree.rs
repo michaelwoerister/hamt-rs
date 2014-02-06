@@ -19,7 +19,7 @@
 // THE SOFTWARE.
 
 use sync::Arc;
-use persistent::PersistentMap;
+use PersistentMap;
 use item_store::{ItemStore, CopyStore, ShareStore};
 
 #[deriving(Clone, Eq)]
@@ -625,9 +625,6 @@ mod tests {
     #[test]
     fn test_remove_copy() { Test::test_remove(RedBlackTree::<uint, uint, CopyStore<uint, uint>>::new()); }
 
-    #[test]
-    fn test_random_copy() { Test::test_random(RedBlackTree::<uint, uint, CopyStore<uint, uint>>::new()); }
-
     #[bench]
     fn bench_insert_copy_10(bh: &mut BenchHarness) {
         Test::bench_insert(RedBlackTree::<uint, uint, CopyStore<uint, uint>>::new(), 10, bh);
@@ -696,9 +693,6 @@ mod tests {
 
     #[test]
     fn test_remove_shared() { Test::test_remove(RedBlackTree::<uint, uint, ShareStore<uint, uint>>::new()); }
-
-    #[test]
-    fn test_random_shared() { Test::test_random(RedBlackTree::<uint, uint, ShareStore<uint, uint>>::new()); }
 
     #[bench]
     fn bench_insert_shared_10(bh: &mut BenchHarness) {

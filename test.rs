@@ -1,12 +1,13 @@
 
-use persistent::PersistentMap;
-use std::hashmap::HashSet;
 use std::rand;
 use std::rand::Rng;
 use std::iter::range;
-use extra::test::BenchHarness;
 use std::hashmap::HashMap;
 use std::trie::TrieMap;
+
+use extra::test::BenchHarness;
+
+use PersistentMap;
 
 macro_rules! assert_find(
     ($map:ident, $key:expr, None) => (
@@ -122,41 +123,6 @@ impl<TPersistentMap: PersistentMap<uint, uint>> Test {
         assert_eq!(map11.len(), 0);
     }
 
-    pub fn test_random(empty: TPersistentMap) {
-        let mut values: HashSet<uint> = HashSet::new();
-        let mut rng = rand::rng();
-
-        for _ in range(0, 2000000) {
-            values.insert(rand::Rand::rand(&mut rng));
-        }
-
-        let mut map = empty;
-
-        for &x in values.iter() {
-            let (map1, _) = map.insert(x, x);
-            map = map1;
-        }
-
-        for &x in values.iter() {
-            assert_find!(map, x, x);
-        }
-
-        for (i, x) in values.iter().enumerate() {
-            if i % 2 == 0 {
-                let (map1, _) = map.remove(x);
-                map = map1;
-            }
-        }
-
-        for (i, &x) in values.iter().enumerate() {
-            if i % 2 != 0 {
-                assert_find!(map, x, x);
-            } else {
-                assert_find!(map, x, None);
-            }
-        }
-    }
-
     pub fn random_insert_remove_stress_test(empty: TPersistentMap) {
         let mut reference: TrieMap<uint> = TrieMap::new();
         let mut rng = rand::rng();
@@ -199,8 +165,9 @@ impl<TPersistentMap: PersistentMap<uint, uint>> Test {
         }
 
         bh.iter(|| {
-            for x in values.rev_iter() {
-                let _ = map.find(x);
+            for i in range(0u, 1000u) {
+                let val = values[i % count];
+                let _ = map.find(&val);
             }
         })
     }
@@ -248,8 +215,9 @@ fn bench_find_hashmap<T: MutableMap<uint, uint>>(empty: T, count: uint, bh: &mut
     }
 
     bh.iter(|| {
-        for x in values.rev_iter() {
-            let _ = map.find(x);
+        for i in range(0u, 1000u) {
+            let val = values[i % count];
+            let _ = map.find(&val);
         }
     })
 }
