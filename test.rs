@@ -129,7 +129,7 @@ impl<TPersistentMap: PersistentMap<uint, uint>> Test {
 
         let mut map = empty;
 
-        for _ in range(0, 10000000) {
+        for _ in range(0, 500000) {
             let value = rng.gen();
 
             if rng.gen_weighted_bool(2) {

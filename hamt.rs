@@ -497,23 +497,30 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                            new_kvp: IS,
                            insertion_count: &mut uint)
                         -> Option<NodeRef<K, V, IS>> {
+
         assert!(level <= LAST_LEVEL);
         let local_key = (hash & LEVEL_BIT_MASK) as uint;
 
-        if !self.can_insert_in_place(local_key) {
-            // fallback
-            return Some(self.insert(hash, level, new_kvp, insertion_count));
-        }
-
         // See if the slot is free
         if (self.mask & (1 << local_key)) == 0 {
-            // If yes, then fill it with a single-item entry
-            *insertion_count = 1;
-            self.insert_entry_in_place(local_key, SingleItemOwned(new_kvp));
-            return None;
+            if self.entry_count() < self.capacity as uint {
+                // If yes, then fill it with a single-item entry
+                *insertion_count = 1;
+                self.insert_entry_in_place(local_key, SingleItemOwned(new_kvp));
+                return None;
+            } else {
+                // else fall back to copying
+                return Some(self.insert(hash, level, new_kvp, insertion_count));
+            }
         }
 
         let index = get_index(self.mask, local_key);
+
+        // If there is no space left in this node but we would need it, again fall back to copying
+        if self.entry_count() == self.capacity as uint &&
+           self.get_entry_type_code(index) != SUBTREE_ENTRY {
+            return Some(self.insert(hash, level, new_kvp, insertion_count));
+        }
 
         let new_entry = match self.get_entry_mut(index) {
             SingleItemMut(existing_kvp_ref) => {
@@ -924,16 +931,6 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         }
 
         return new_node_ref;
-    }
-
-    // Determines whether a key-value pair can be inserted in place at the given `local_key`.
-    fn can_insert_in_place(&self, local_key: uint) -> bool {
-        let bit = (1 << local_key);
-        if (self.mask & bit) != 0 {
-            true
-        } else {
-            self.entry_count() < self.capacity as uint
-        }
     }
 
     // Inserts a new node entry in-place. Will take care of modifying node entry data, including the
