@@ -27,77 +27,33 @@ use std::mem;
 use std::ptr;
 use std::vec;
 use std::unstable::intrinsics;
-use std::sync::atomics::{AtomicUint, Acquire, Release};
+use std::sync::atomics::{AtomicUint, SeqCst};
 use std::rt::global_heap::{exchange_malloc, exchange_free};
 
-use extra::arc::Arc;
+use sync::Arc;
 use persistent::PersistentMap;
 use item_store::{ItemStore, CopyStore, ShareStore};
+use noderef::{NodeRef, RefCountedNode, SharedNode, OwnedNode};
 
-
-//=-------------------------------------------------------------------------------------------------
-// NodeRef
-//=-------------------------------------------------------------------------------------------------
-struct NodeRef<K, V, IS> {
-    ptr: *mut UnsafeNode<K, V, IS>
-}
-
-enum NodeRefBorrowResult<'a, K, V, IS> {
-    OwnedNode(&'a mut UnsafeNode<K, V, IS>),
-    SharedNode(&'a UnsafeNode<K, V, IS>),
-}
-
-impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> NodeRef<K, V, IS> {
-    fn borrow<'a>(&'a self) -> &'a UnsafeNode<K, V, IS> {
-        unsafe {
-            cast::transmute(self.ptr)
-        }
+impl<K, V, IS> RefCountedNode for UnsafeNode<K, V, IS> {
+    fn get_ref_count(&self) -> uint {
+        self.ref_count.load(SeqCst)
     }
 
-    fn borrow_mut<'a>(&'a mut self) -> &'a mut UnsafeNode<K, V, IS> {
-        unsafe {
-            assert!((*self.ptr).ref_count.load(Acquire) == 1);
-            cast::transmute(self.ptr)
-        }
+    // Increments the refcount and returns the old value
+    fn inc_ref_count(&self) -> uint {
+        self.ref_count.load(SeqCst)
     }
 
-    fn try_borrow_owned<'a>(&'a mut self) -> NodeRefBorrowResult<'a, K, V, IS> {
-        unsafe {
-            if (*self.ptr).ref_count.load(Acquire) == 1 {
-                OwnedNode(cast::transmute(self.ptr))
-            } else {
-                SharedNode(cast::transmute(self.ptr))
-            }
-        }
+    // Decrements the refcount and returns the old value
+    fn dec_ref_count(&self) -> uint {
+        self.ref_count.load(SeqCst)
+    }
+
+    fn destroy(&mut self) {
+        self.destroy();
     }
 }
-
-#[unsafe_destructor]
-impl<K, V, IS> Drop for NodeRef<K, V, IS> {
-    fn drop(&mut self) {
-        unsafe {
-            let node: &mut UnsafeNode<K, V, IS> = cast::transmute(self.ptr);
-            let old_count = node.ref_count.fetch_sub(1, Acquire);
-            assert!(old_count >= 1);
-            if old_count == 1 {
-                node.destroy()
-            }
-        }
-    }
-}
-
-impl<K, V, IS> Clone for NodeRef<K, V, IS> {
-    fn clone(&self) -> NodeRef<K, V, IS> {
-        unsafe {
-            let node: &mut UnsafeNode<K, V, IS> = cast::transmute(self.ptr);
-            let old_count = node.ref_count.fetch_add(1, Release);
-            assert!(old_count >= 1);
-        }
-
-        NodeRef { ptr: self.ptr }
-    }
-}
-
 
 
 //=-------------------------------------------------------------------------------------------------
@@ -111,7 +67,7 @@ static MIN_CAPACITY: uint = 4;
 struct AlignmentStruct<K, V, IS> {
     a: Arc<~[IS]>,
     b: IS,
-    c: NodeRef<K, V, IS>
+    c: NodeRef<UnsafeNode<K, V, IS>>
 }
 
 struct UnsafeNode<K, V, IS> {
@@ -125,7 +81,7 @@ struct UnsafeNode<K, V, IS> {
 enum NodeEntry<'a, K, V, IS> {
     Collision(&'a Arc<~[IS]>),
     SingleItem(&'a IS),
-    SubTree(&'a NodeRef<K, V, IS>)
+    SubTree(&'a NodeRef<UnsafeNode<K, V, IS>>)
 }
 
 impl<'a, K: Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> NodeEntry<'a, K, V, IS> {
@@ -145,20 +101,20 @@ static COLLISION_ENTRY: uint = 0b11;
 enum NodeEntryMut<'a, K, V, IS> {
     CollisionMut(&'a mut Arc<~[IS]>),
     SingleItemMut(&'a mut IS),
-    SubTreeMut(&'a mut NodeRef<K, V, IS>)
+    SubTreeMut(&'a mut NodeRef<UnsafeNode<K, V, IS>>)
 }
 
 enum NodeEntryOwned<K, V, IS> {
     CollisionOwned(Arc<~[IS]>),
     SingleItemOwned(IS),
-    SubTreeOwned(NodeRef<K, V, IS>)
+    SubTreeOwned(NodeRef<UnsafeNode<K, V, IS>>)
 }
 
 enum RemovalResult<K, V, IS> {
     // Don't do anything
     NoChange,
     // Replace the sub-tree entry with another sub-tree entry pointing to the given node
-    ReplaceSubTree(NodeRef<K, V, IS>),
+    ReplaceSubTree(NodeRef<UnsafeNode<K, V, IS>>),
     // Collapse the sub-tree into a singe-item entry
     CollapseSubTree(IS),
     // Completely remove the entry
@@ -242,12 +198,12 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
             mem::size_of::<IS>(),
             ::std::num::max(
                 mem::size_of::<Arc<~[IS]>>(),
-                mem::size_of::<NodeRef<K, V, IS>>(),
+                mem::size_of::<NodeRef<UnsafeNode<K, V, IS>>>(),
             )
         )
     }
 
-    fn alloc(mask: u32, capacity: uint) -> NodeRef<K, V, IS> {
+    fn alloc(mask: u32, capacity: uint) -> NodeRef<UnsafeNode<K, V, IS>> {
         assert!(size_of_zero_entry_array::<K, V, IS>() == 0);
         fn size_of_zero_entry_array<K, V, IS>() -> uint {
             let node: UnsafeNode<K, V, IS> = UnsafeNode {
@@ -318,7 +274,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
               level: uint,
               new_kvp: IS,
               insertion_count: &mut uint)
-           -> NodeRef<K, V, IS> {
+           -> NodeRef<UnsafeNode<K, V, IS>> {
         assert!(level <= LAST_LEVEL);
         let local_key = (hash & LEVEL_BIT_MASK) as uint;
 
@@ -420,7 +376,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                            level: uint,
                            new_kvp: IS,
                            insertion_count: &mut uint)
-                        -> Option<NodeRef<K, V, IS>> {
+                        -> Option<NodeRef<UnsafeNode<K, V, IS>>> {
         assert!(level <= LAST_LEVEL);
         let local_key = (hash & LEVEL_BIT_MASK) as uint;
 
@@ -663,7 +619,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
     fn copy_with_new_entry(&self,
                            local_key: uint,
                            new_entry: NodeEntryOwned<K, V, IS>)
-                        -> NodeRef<K, V, IS> {
+                        -> NodeRef<UnsafeNode<K, V, IS>> {
         let replace_old_entry = (self.mask & (1 << local_key)) != 0;
         let new_mask: u32 = self.mask | (1 << local_key);
         let mut new_node_ref = UnsafeNode::alloc(new_mask, self.expanded_capacity());
@@ -760,7 +716,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         }
     }
 
-    fn copy_without_entry(&self, local_key: uint) -> NodeRef<K, V, IS> {
+    fn copy_without_entry(&self, local_key: uint) -> NodeRef<UnsafeNode<K, V, IS>> {
         assert!((self.mask & (1 << local_key)) != 0);
 
         let new_mask = self.mask & !(1 << local_key);
@@ -816,7 +772,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                         existing_kvp: &IS,
                         existing_hash: u64,
                         level: uint)
-                     -> NodeRef<K, V, IS> {
+                     -> NodeRef<UnsafeNode<K, V, IS>> {
         assert!(level <= LAST_LEVEL);
 
         let new_local_key = new_hash & LEVEL_BIT_MASK;
@@ -869,7 +825,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
 // HamtMap
 //=-------------------------------------------------------------------------------------------------
 struct HamtMap<K, V, IS> {
-    root: NodeRef<K, V, IS>,
+    root: NodeRef<UnsafeNode<K, V, IS>>,
     element_count: uint,
 }
 

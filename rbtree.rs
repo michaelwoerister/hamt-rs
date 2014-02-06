@@ -18,7 +18,7 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-use extra::arc::Arc;
+use sync::Arc;
 use persistent::PersistentMap;
 use item_store::{ItemStore, CopyStore, ShareStore};
 

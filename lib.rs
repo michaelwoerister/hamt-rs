@@ -25,9 +25,12 @@
 #[feature(macro_rules)]; // Used for test cases
 
 extern mod extra;
+extern mod sync;
+
 pub mod persistent;
 pub mod hamt;
 mod test;
 pub mod rbtree;
 
 mod item_store;
+mod noderef;
