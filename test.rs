@@ -2,6 +2,7 @@
 use persistent::PersistentMap;
 use std::hashmap::HashSet;
 use std::rand;
+use std::rand::Rng;
 use std::iter::range;
 use extra::test::BenchHarness;
 use std::hashmap::HashMap;
@@ -125,7 +126,7 @@ impl<TPersistentMap: PersistentMap<uint, uint>> Test {
         let mut values: HashSet<uint> = HashSet::new();
         let mut rng = rand::rng();
 
-        for _ in range(0, 20000) {
+        for _ in range(0, 2000000) {
             values.insert(rand::Rand::rand(&mut rng));
         }
 
@@ -152,6 +153,35 @@ impl<TPersistentMap: PersistentMap<uint, uint>> Test {
                 assert_find!(map, x, x);
             } else {
                 assert_find!(map, x, None);
+            }
+        }
+    }
+
+    pub fn random_insert_remove_stress_test(empty: TPersistentMap) {
+        let mut reference: TrieMap<uint> = TrieMap::new();
+        let mut rng = rand::rng();
+
+        let mut map = empty;
+
+        for _ in range(0, 10000000) {
+            let value = rng.gen();
+
+            if rng.gen_weighted_bool(2) {
+                let ref_size_change = reference.remove(&value);
+                let (map1, size_change) = map.remove(&value);
+                assert_eq!(ref_size_change, size_change);
+                assert_find!(map1, value, None);
+                assert_eq!(reference.len(), map1.len());
+                assert_eq!(reference.find(&value), map1.find(&value));
+                map = map1;
+            } else {
+                let ref_size_change = reference.insert(value, value);
+                let (map1, size_change) = map.insert(value, value);
+                assert_eq!(ref_size_change, size_change);
+                assert_find!(map1, value, value);
+                assert_eq!(reference.len(), map1.len());
+                assert_eq!(reference.find(&value), map1.find(&value));
+                map = map1;
             }
         }
     }

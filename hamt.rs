@@ -638,6 +638,120 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         }
     }
 
+    fn remove_in_place(&mut self,
+                       hash: u64,
+                       level: uint,
+                       key: &K,
+                       removal_count: &mut uint)
+                    -> RemovalResult<K, V, IS> {
+        assert!(level <= LAST_LEVEL);
+        let local_key = (hash & LEVEL_BIT_MASK) as uint;
+
+        if (self.mask & (1 << local_key)) == 0 {
+            *removal_count = 0;
+            return NoChange;
+        }
+
+        let index = get_index(self.mask, local_key);
+
+        enum Action<K, V, IS> {
+            CollapseKillOrChange,
+            NoAction,
+            ReplaceEntry(NodeEntryOwned<K, V, IS>)
+        }
+
+        let action: Action<K, V, IS> = match self.get_entry_mut(index) {
+            SingleItemMut(existing_kvp_ref) => {
+                if *existing_kvp_ref.key() == *key {
+                    *removal_count = 1;
+                    CollapseKillOrChange
+                } else {
+                    *removal_count = 0;
+                    NoAction
+                }
+            }
+            CollisionMut(items_ref) => {
+                assert!(level == LAST_LEVEL);
+                let items = items_ref.get();
+                let position = items.iter().position(|kvp| *kvp.key() == *key);
+
+                match position {
+                    None => {
+                        *removal_count = 0;
+                        NoAction
+                    },
+                    Some(position) => {
+                        *removal_count = 1;
+                        let item_count = items.len() - 1;
+
+                        // The new entry can either still be a collision node, or it can be a simple
+                        // single-item node if the hash collision has been resolved by the removal
+                        let new_entry = if item_count > 1 {
+                            let mut new_items = vec::with_capacity(item_count);
+
+                            if position > 0 {
+                                new_items.push_all(items.slice_to(position));
+                            }
+                            if position < item_count - 1 {
+                                new_items.push_all(items.slice_from(position + 1));
+                            }
+                            assert!(new_items.len() == item_count);
+
+                            CollisionOwned(Arc::new(new_items))
+                        } else {
+                            assert!(items.len() == 2);
+                            assert!(position == 0 || position == 1);
+                            let index_of_remaining_item = 1 - position;
+                            let kvp = items[index_of_remaining_item].clone();
+
+                            SingleItemOwned(kvp)
+                        };
+
+                        ReplaceEntry(new_entry)
+                    }
+                }
+            }
+            SubTreeMut(sub_tree_ref) => {
+                let result = match sub_tree_ref.try_borrow_owned() {
+                    SharedNode(node_ref) => node_ref.remove(hash >> BITS_PER_LEVEL,
+                                                            level + 1,
+                                                            key,
+                                                            removal_count),
+                    OwnedNode(node_ref) => node_ref.remove_in_place(hash >> BITS_PER_LEVEL,
+                                                                    level + 1,
+                                                                    key,
+                                                                    removal_count)
+                };
+
+                match result {
+                    NoChange => NoAction,
+                    ReplaceSubTree(x) => {
+                        ReplaceEntry(SubTreeOwned(x))
+                    }
+                    CollapseSubTree(kvp) => {
+                        if bit_count(self.mask) == 1 {
+                            return CollapseSubTree(kvp);
+                        }
+
+                        ReplaceEntry(SingleItemOwned(kvp))
+                    },
+                    KillSubTree => {
+                        CollapseKillOrChange
+                    }
+                }
+            }
+        };
+
+        match action {
+            NoAction => NoChange,
+            CollapseKillOrChange => self.collapse_kill_or_change_in_place(local_key, index),
+            ReplaceEntry(new_entry) => {
+                self.insert_entry_in_place(local_key, new_entry);
+                NoChange
+            }
+        }
+    }
+
     // Determines how the parent node should handle the removal of the entry at local_key from this
     // node.
     fn collapse_kill_or_change(&self, local_key: uint, entry_index: uint) -> RemovalResult<K, V, IS> {
@@ -654,6 +768,32 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                 }
                 _ => ReplaceSubTree(self.copy_without_entry(local_key))
             }
+        } else {
+            assert!(new_entry_count == 0);
+            KillSubTree
+        }
+    }
+
+    // Determines how the parent node should handle the removal of the entry at local_key from this
+    // node.
+    fn collapse_kill_or_change_in_place(&mut self, local_key: uint, entry_index: uint) -> RemovalResult<K, V, IS> {
+        let new_entry_count = self.entry_count() - 1;
+
+        if new_entry_count > 1 {
+            self.remove_entry_in_place(local_key);
+            NoChange
+        } else if new_entry_count == 1 {
+            let other_index = 1 - entry_index;
+
+            match self.get_entry(other_index) {
+                SingleItem(kvp_ref) => {
+                    return CollapseSubTree(kvp_ref.clone())
+                }
+                _ => { /* */ }
+            }
+
+            self.remove_entry_in_place(local_key);
+            NoChange
         } else {
             assert!(new_entry_count == 0);
             KillSubTree
@@ -739,7 +879,7 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
                         UnsafeNode::<K, V, IS>::node_entry_size();
                     ptr::copy_memory(dest, source, count);
 
-                    let type_mask_up_to_index: u64 = 0xFFFFFFFFFFFFFFFF << ((index + 1) * 2);
+                    let type_mask_up_to_index: u64 = 0xFFFFFFFFFFFFFFFFu64 << ((index + 1) * 2);
                     self.entry_types = ((self.entry_types << 2) & type_mask_up_to_index) |
                                        (self.entry_types & !type_mask_up_to_index);
                 }
@@ -793,23 +933,32 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>> UnsafeNode<K, 
         return new_node_ref;
     }
 
-    // fn remove_entry_in_place(&mut self, local_key: uint) {
-     // assert!((self.mask & (1 << local_key)) != 0);
+    fn remove_entry_in_place(&mut self, local_key: uint) {
+        assert!((self.mask & (1 << local_key)) != 0);
 
-    //     let new_mask = self.mask & !(1 << local_key);
-    //     let index = get_index(self.mask, local_key);
+        let new_mask = self.mask & !(1 << local_key);
+        let index = get_index(self.mask, local_key);
 
-    //     unsafe {
-    //         self.drop_entry(index);
+        unsafe {
+            self.drop_entry(index);
 
-    //         let source = ptr::to_unsafe_ptr(self.get_entry(index + 1));
-    //         let dest = cast::transmute_mut_unsafe(source.offset(-1));
-    //         let count = self.entry_count() - (index + 1);
-    //         ptr::copy_memory(dest, source, count);
-    //     }
+            if index < self.entry_count() - 1 {
+                let source: *u8 = self.get_entry_ptr(index + 1);
+                let dest: *mut u8 = cast::transmute_mut_unsafe(
+                    source.offset(-(UnsafeNode::<K, V, IS>::node_entry_size() as int))
+                    );
+                let count = (self.entry_count() - (index + 1)) *
+                    UnsafeNode::<K, V, IS>::node_entry_size();
+                ptr::copy_memory(dest, source, count);
 
-    //     self.mask = new_mask;
-    // }
+                let type_mask_up_to_index: u64 = 0xFFFFFFFFFFFFFFFFu64 << ((index + 1) * 2);
+                self.entry_types = ((self.entry_types & type_mask_up_to_index) >> 2) |
+                                   (self.entry_types & !(type_mask_up_to_index >> 2));
+            }
+        }
+
+        self.mask = new_mask;
+    }
 
     fn new_with_entries(new_kvp: IS,
                         new_hash: u64,
@@ -951,16 +1100,21 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V> + Send + Freeze
         )
     }
 
-    fn remove_internal(self, key: &K) -> (HamtMap<K, V, IS>, bool) {
+    fn try_remove_in_place(mut self, key: &K) -> (HamtMap<K, V, IS>, bool) {
         let hash = key.hash();
         let mut removal_count = 0xdeadbeaf;
-        let removal_result = self.root.borrow().remove(hash, 0, key, &mut removal_count);
+
+        // let removal_result = self.root.borrow().remove(hash, 0, key, &mut removal_count);
+        let removal_result = match self.root.try_borrow_owned() {
+            SharedNode(node_ref) => node_ref.remove(hash, 0, key, &mut removal_count),
+            OwnedNode(node_ref) => node_ref.remove_in_place(hash, 0, key, &mut removal_count)
+        };
         assert!(removal_count != 0xdeadbeaf);
         let new_element_count = self.element_count - removal_count;
 
         (match removal_result {
             NoChange => HamtMap {
-                root: self.root.clone(),
+                root: self.root,
                 element_count: new_element_count
             },
             ReplaceSubTree(new_root) => HamtMap {
@@ -972,13 +1126,13 @@ impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V> + Send + Freeze
                 let local_key = (kvp.key().hash() & LEVEL_BIT_MASK) as uint;
 
                 let mask = 1 << local_key;
-                let mut root_ref = UnsafeNode::alloc(mask, MIN_CAPACITY);
+                let mut new_root_ref = UnsafeNode::alloc(mask, MIN_CAPACITY);
                 {
-                    let root = root_ref.borrow_mut();
+                    let root = new_root_ref.borrow_mut();
                     root.init_entry(0, SingleItemOwned(kvp));
                 }
                 HamtMap {
-                    root: root_ref,
+                    root: new_root_ref,
                     element_count: new_element_count
                 }
             }
@@ -1026,7 +1180,7 @@ PersistentMap<K, V> for HamtMap<K, V, CopyStore<K, V>> {
     }
 
     fn remove(self, key: &K) -> (HamtMap<K, V, CopyStore<K, V>>, bool) {
-        self.remove_internal(key)
+        self.try_remove_in_place(key)
     }
 }
 
@@ -1039,7 +1193,7 @@ PersistentMap<K, V> for HamtMap<K, V, ShareStore<K, V>> {
     }
 
     fn remove(self, key: &K) -> (HamtMap<K, V, ShareStore<K, V>>, bool) {
-        self.remove_internal(key)
+        self.try_remove_in_place(key)
     }
 }
 
@@ -1102,6 +1256,11 @@ mod tests {
 
     #[test]
     fn test_random_copy() { Test::test_random(HamtMap::<uint, uint, CopyStoreU64>::new()); }
+
+    #[test]
+    fn stress_test_copy() { Test::random_insert_remove_stress_test(HamtMap::<uint, uint, CopyStoreU64>::new()); }
+
+
 
     #[bench]
     fn bench_insert_copy_10(bh: &mut BenchHarness) {
@@ -1188,6 +1347,10 @@ mod tests {
 
     #[test]
     fn test_random_share() { Test::test_random(HamtMap::<uint, uint, ShareStoreU64>::new()); }
+
+    #[test]
+    fn stress_test_share() { Test::random_insert_remove_stress_test(HamtMap::<uint, uint, ShareStoreU64>::new()); }
+
 
     #[bench]
     fn bench_insert_share_10(bh: &mut BenchHarness) {
