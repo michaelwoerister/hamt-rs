@@ -1068,8 +1068,8 @@ mod tests {
     use test::Test;
     use extra::test::BenchHarness;
 
-    type CopyStoreU64 = CopyStore<u64, u64>;
-    type ShareStoreU64 = ShareStore<u64, u64>;
+    type CopyStoreU64 = CopyStore<uint, uint>;
+    type ShareStoreU64 = ShareStore<uint, uint>;
 
     #[test]
     fn test_get_index() {
@@ -1084,83 +1084,83 @@ mod tests {
     }
 
     #[test]
-    fn test_insert_copy() { Test::test_insert(HamtMap::<u64, u64, CopyStoreU64>::new()); }
+    fn test_insert_copy() { Test::test_insert(HamtMap::<uint, uint, CopyStoreU64>::new()); }
 
     #[test]
-    fn test_insert_ascending_copy() { Test::test_insert_ascending(HamtMap::<u64, u64, CopyStoreU64>::new()); }
+    fn test_insert_ascending_copy() { Test::test_insert_ascending(HamtMap::<uint, uint, CopyStoreU64>::new()); }
 
     #[test]
     fn test_insert_descending_copy() {
-        Test::test_insert_descending(HamtMap::<u64, u64, CopyStoreU64>::new());
+        Test::test_insert_descending(HamtMap::<uint, uint, CopyStoreU64>::new());
     }
 
     #[test]
-    fn test_insert_overwrite_copy() { Test::test_insert_overwrite(HamtMap::<u64, u64, CopyStoreU64>::new()); }
+    fn test_insert_overwrite_copy() { Test::test_insert_overwrite(HamtMap::<uint, uint, CopyStoreU64>::new()); }
 
     #[test]
-    fn test_remove_copy() { Test::test_remove(HamtMap::<u64, u64, CopyStoreU64>::new()); }
+    fn test_remove_copy() { Test::test_remove(HamtMap::<uint, uint, CopyStoreU64>::new()); }
 
     #[test]
-    fn test_random_copy() { Test::test_random(HamtMap::<u64, u64, CopyStoreU64>::new()); }
+    fn test_random_copy() { Test::test_random(HamtMap::<uint, uint, CopyStoreU64>::new()); }
 
     #[bench]
     fn bench_insert_copy_10(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMap::<u64, u64, CopyStoreU64>::new(), 10, bh);
+        Test::bench_insert(HamtMap::<uint, uint, CopyStoreU64>::new(), 10, bh);
     }
 
     #[bench]
     fn bench_insert_copy_100(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMap::<u64, u64, CopyStoreU64>::new(), 100, bh);
+        Test::bench_insert(HamtMap::<uint, uint, CopyStoreU64>::new(), 100, bh);
     }
 
     #[bench]
     fn bench_insert_copy_1000(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMap::<u64, u64, CopyStoreU64>::new(), 1000, bh);
+        Test::bench_insert(HamtMap::<uint, uint, CopyStoreU64>::new(), 1000, bh);
     }
 
     #[bench]
     fn bench_insert_copy_50000(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMap::<u64, u64, CopyStoreU64>::new(), 50000, bh);
+        Test::bench_insert(HamtMap::<uint, uint, CopyStoreU64>::new(), 50000, bh);
     }
 
     #[bench]
     fn bench_find_copy_10(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMap::<u64, u64, CopyStoreU64>::new(), 10, bh);
+        Test::bench_find(HamtMap::<uint, uint, CopyStoreU64>::new(), 10, bh);
     }
 
     #[bench]
     fn bench_find_copy_100(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMap::<u64, u64, CopyStoreU64>::new(), 100, bh);
+        Test::bench_find(HamtMap::<uint, uint, CopyStoreU64>::new(), 100, bh);
     }
 
     #[bench]
     fn bench_find_copy_1000(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMap::<u64, u64, CopyStoreU64>::new(), 1000, bh);
+        Test::bench_find(HamtMap::<uint, uint, CopyStoreU64>::new(), 1000, bh);
     }
 
     #[bench]
     fn bench_find_copy_50000(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMap::<u64, u64, CopyStoreU64>::new(), 50000, bh);
+        Test::bench_find(HamtMap::<uint, uint, CopyStoreU64>::new(), 50000, bh);
     }
 
     #[bench]
     fn bench_remove_copy_10(bh: &mut BenchHarness) {
-        Test::bench_remove(HamtMap::<u64, u64, CopyStoreU64>::new(), 10, bh);
+        Test::bench_remove(HamtMap::<uint, uint, CopyStoreU64>::new(), 10, bh);
     }
 
     #[bench]
     fn bench_remove_copy_100(bh: &mut BenchHarness) {
-        Test::bench_remove(HamtMap::<u64, u64, CopyStoreU64>::new(), 100, bh);
+        Test::bench_remove(HamtMap::<uint, uint, CopyStoreU64>::new(), 100, bh);
     }
 
     #[bench]
     fn bench_remove_copy_1000(bh: &mut BenchHarness) {
-        Test::bench_remove(HamtMap::<u64, u64, CopyStoreU64>::new(), 1000, bh);
+        Test::bench_remove(HamtMap::<uint, uint, CopyStoreU64>::new(), 1000, bh);
     }
 
     #[bench]
     fn bench_remove_copy_50000(bh: &mut BenchHarness) {
-        Test::bench_remove(HamtMap::<u64, u64, CopyStoreU64>::new(), 50000, bh);
+        Test::bench_remove(HamtMap::<uint, uint, CopyStoreU64>::new(), 50000, bh);
     }
 
 
@@ -1168,84 +1168,84 @@ mod tests {
 
 
     #[test]
-    fn test_insert_share() { Test::test_insert(HamtMap::<u64, u64, ShareStoreU64>::new()); }
+    fn test_insert_share() { Test::test_insert(HamtMap::<uint, uint, ShareStoreU64>::new()); }
 
     #[test]
     fn test_insert_ascending_share() {
-        Test::test_insert_ascending(HamtMap::<u64, u64, ShareStoreU64>::new());
+        Test::test_insert_ascending(HamtMap::<uint, uint, ShareStoreU64>::new());
     }
 
     #[test]
     fn test_insert_descending_share() {
-        Test::test_insert_descending(HamtMap::<u64, u64, ShareStoreU64>::new());
+        Test::test_insert_descending(HamtMap::<uint, uint, ShareStoreU64>::new());
     }
 
     #[test]
-    fn test_insert_overwrite_share() { Test::test_insert_overwrite(HamtMap::<u64, u64, ShareStoreU64>::new()); }
+    fn test_insert_overwrite_share() { Test::test_insert_overwrite(HamtMap::<uint, uint, ShareStoreU64>::new()); }
 
     #[test]
-    fn test_remove_share() { Test::test_remove(HamtMap::<u64, u64, ShareStoreU64>::new()); }
+    fn test_remove_share() { Test::test_remove(HamtMap::<uint, uint, ShareStoreU64>::new()); }
 
     #[test]
-    fn test_random_share() { Test::test_random(HamtMap::<u64, u64, ShareStoreU64>::new()); }
+    fn test_random_share() { Test::test_random(HamtMap::<uint, uint, ShareStoreU64>::new()); }
 
     #[bench]
     fn bench_insert_share_10(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMap::<u64, u64, ShareStoreU64>::new(), 10, bh);
+        Test::bench_insert(HamtMap::<uint, uint, ShareStoreU64>::new(), 10, bh);
     }
 
     #[bench]
     fn bench_insert_share_100(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMap::<u64, u64, ShareStoreU64>::new(), 100, bh);
+        Test::bench_insert(HamtMap::<uint, uint, ShareStoreU64>::new(), 100, bh);
     }
 
     #[bench]
     fn bench_insert_share_1000(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMap::<u64, u64, ShareStoreU64>::new(), 1000, bh);
+        Test::bench_insert(HamtMap::<uint, uint, ShareStoreU64>::new(), 1000, bh);
     }
 
     #[bench]
     fn bench_insert_share_50000(bh: &mut BenchHarness) {
-        Test::bench_insert(HamtMap::<u64, u64, ShareStoreU64>::new(), 50000, bh);
+        Test::bench_insert(HamtMap::<uint, uint, ShareStoreU64>::new(), 50000, bh);
     }
 
     #[bench]
     fn bench_find_share_10(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMap::<u64, u64, ShareStoreU64>::new(), 10, bh);
+        Test::bench_find(HamtMap::<uint, uint, ShareStoreU64>::new(), 10, bh);
     }
 
     #[bench]
     fn bench_find_share_100(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMap::<u64, u64, ShareStoreU64>::new(), 100, bh);
+        Test::bench_find(HamtMap::<uint, uint, ShareStoreU64>::new(), 100, bh);
     }
 
     #[bench]
     fn bench_find_share_1000(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMap::<u64, u64, ShareStoreU64>::new(), 1000, bh);
+        Test::bench_find(HamtMap::<uint, uint, ShareStoreU64>::new(), 1000, bh);
     }
 
     #[bench]
     fn bench_find_share_50000(bh: &mut BenchHarness) {
-        Test::bench_find(HamtMap::<u64, u64, ShareStoreU64>::new(), 50000, bh);
+        Test::bench_find(HamtMap::<uint, uint, ShareStoreU64>::new(), 50000, bh);
     }
 
     #[bench]
     fn bench_remove_share_10(bh: &mut BenchHarness) {
-        Test::bench_remove(HamtMap::<u64, u64, ShareStoreU64>::new(), 10, bh);
+        Test::bench_remove(HamtMap::<uint, uint, ShareStoreU64>::new(), 10, bh);
     }
 
     #[bench]
     fn bench_remove_share_100(bh: &mut BenchHarness) {
-        Test::bench_remove(HamtMap::<u64, u64, ShareStoreU64>::new(), 100, bh);
+        Test::bench_remove(HamtMap::<uint, uint, ShareStoreU64>::new(), 100, bh);
     }
 
     #[bench]
     fn bench_remove_share_1000(bh: &mut BenchHarness) {
-        Test::bench_remove(HamtMap::<u64, u64, ShareStoreU64>::new(), 1000, bh);
+        Test::bench_remove(HamtMap::<uint, uint, ShareStoreU64>::new(), 1000, bh);
     }
 
     #[bench]
     fn bench_remove_share_50000(bh: &mut BenchHarness) {
-        Test::bench_remove(HamtMap::<u64, u64, ShareStoreU64>::new(), 50000, bh);
+        Test::bench_remove(HamtMap::<uint, uint, ShareStoreU64>::new(), 50000, bh);
     }
 }
