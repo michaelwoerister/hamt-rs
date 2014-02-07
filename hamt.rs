@@ -1111,10 +1111,32 @@ struct HamtMap<K, V, IS> {
 // impl HamtMap
 impl<K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V> + Send + Freeze> HamtMap<K, V, IS> {
 
-    fn new() -> HamtMap<K, V, IS> {
+    pub fn new() -> HamtMap<K, V, IS> {
         HamtMap {
             root: UnsafeNode::alloc(0, 0),
             element_count: 0
+        }
+    }
+
+    pub fn iter<'a>(&'a self) -> HamtMapIterator<'a, K, V, IS> {
+        HamtMapIterator {
+            node_stack: [
+                (IterNodeRef(self.root.borrow()), -1),
+                (IterEmpty, 0),
+                (IterEmpty, 0),
+                (IterEmpty, 0),
+                (IterEmpty, 0),
+                (IterEmpty, 0),
+                (IterEmpty, 0),
+                (IterEmpty, 0),
+                (IterEmpty, 0),
+                (IterEmpty, 0),
+                (IterEmpty, 0),
+                (IterEmpty, 0),
+                (IterEmpty, 0),
+            ],
+            stack_size: 1,
+            len: self.element_count
         }
     }
 
@@ -1284,6 +1306,79 @@ PersistentMap<K, V> for HamtMap<K, V, ShareStore<K, V>> {
 }
 
 //=-------------------------------------------------------------------------------------------------
+// HamtMapIterator
+//=-------------------------------------------------------------------------------------------------
+
+enum IteratorNodeRef<'a, K, V, IS> {
+    IterNodeRef(&'a UnsafeNode<K, V, IS>),
+    IterCollisionEntryRef(&'a ~[IS]),
+    IterEmpty
+}
+
+struct HamtMapIterator<'a, K, V, IS> {
+    node_stack: [(IteratorNodeRef<'a, K, V, IS>, int), .. LAST_LEVEL + 2],
+    stack_size: uint,
+    len: uint,
+}
+
+impl<'a, K: Hash+Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>>
+Iterator<(&'a K, &'a V)> for HamtMapIterator<'a, K, V, IS> {
+
+    fn next(&mut self) -> Option<(&'a K, &'a V)> {
+        if self.stack_size == 0 {
+            return None;
+        }
+
+        let (current_node, index) = self.node_stack[self.stack_size - 1];
+        let next_index: uint = (index + 1) as uint;
+
+        match current_node {
+            IterNodeRef(node_ref) => {
+                if next_index == node_ref.entry_count() {
+                    self.stack_size -= 1;
+                    return self.next();
+                } else {
+                    let (_, ref mut stack_index) = self.node_stack[self.stack_size - 1];
+                    *stack_index = next_index as int;
+                }
+
+                match node_ref.get_entry(next_index) {
+                    SingleItem(item_ref) => {
+                        return Some((item_ref.key(), item_ref.val()));
+                    }
+                    Collision(items_ref_arc) => {
+                        let items_ref = items_ref_arc.get();
+                        self.node_stack[self.stack_size] = (IterCollisionEntryRef(items_ref), 0);
+                        self.stack_size += 1;
+                        let item = &items_ref[0];
+                        return Some((item.key(), item.val()));
+                    },
+                    SubTree(subtree_ref) => {
+                        self.node_stack[self.stack_size] = (IterNodeRef(subtree_ref.borrow()), -1);
+                        self.stack_size += 1;
+                        return self.next();
+                    }
+                };
+            }
+            IterCollisionEntryRef(items_ref) => {
+                if next_index == items_ref.len() {
+                    self.stack_size -= 1;
+                    return self.next();
+                }
+
+                let item = &items_ref[next_index];
+                return Some((item.key(), item.val()));
+            }
+            IterEmpty => unreachable!()
+        }
+    }
+
+    fn size_hint(&self) -> (uint, Option<uint>) {
+        (self.len, Some(self.len))
+    }
+}
+
+//=-------------------------------------------------------------------------------------------------
 // Utility functions
 //=------------------------------------------------------------------------------------------------
 fn get_index(mask: u32, index: uint) -> uint {
@@ -1307,6 +1402,8 @@ mod tests {
     use item_store::{CopyStore, ShareStore};
     use test::Test;
     use extra::test::BenchHarness;
+    use std::hashmap::HashMap;
+    use PersistentMap;
 
     type CopyStoreU64 = CopyStore<uint, uint>;
     type ShareStoreU64 = ShareStore<uint, uint>;
@@ -1321,6 +1418,27 @@ mod tests {
         assert_eq!(get_index(0b00000000000000000000000000101010, 1), 0);
         assert_eq!(get_index(0b00000000000000000000000000101010, 3), 1);
         assert_eq!(get_index(0b00000000000000000000000000101010, 5), 2);
+    }
+
+    #[test]
+    fn test_iterator_copy() {
+        let mut map: HamtMap<uint, uint, CopyStore<uint, uint>> = HamtMap::new();
+        let count = 1000u;
+
+        for i in range(0, count) {
+            map = map.plus(i, i);
+        }
+
+        let it = map.iter();
+        assert_eq!((count, Some(count)), it.size_hint());
+
+        let test: HashMap<uint, uint> = it.map(|(x, y)| (*x, *y)).collect();
+
+        assert_eq!(count, test.len());
+
+        for i in range(0, count) {
+            assert_eq!(test.find(&i), Some(&i));
+        }
     }
 
     #[test]
@@ -1405,9 +1523,49 @@ mod tests {
         Test::bench_remove(HamtMap::<uint, uint, CopyStoreU64>::new(), 50000, bh);
     }
 
+    #[bench]
+    fn bench_iterate_copy_10(bh: &mut BenchHarness) {
+        bench_iterator_copy(HamtMap::<uint, uint, CopyStoreU64>::new(), 10, bh);
+    }
+
+    #[bench]
+    fn bench_iterate_copy_100(bh: &mut BenchHarness) {
+        bench_iterator_copy(HamtMap::<uint, uint, CopyStoreU64>::new(), 100, bh);
+    }
+
+    #[bench]
+    fn bench_iterate_copy_1000(bh: &mut BenchHarness) {
+        bench_iterator_copy(HamtMap::<uint, uint, CopyStoreU64>::new(), 1000, bh);
+    }
+
+    #[bench]
+    fn bench_iterate_copy_50000(bh: &mut BenchHarness) {
+        bench_iterator_copy(HamtMap::<uint, uint, CopyStoreU64>::new(), 50000, bh);
+    }
+
 
 //= Shared -----------------------------------------------------------------------------------------
 
+    #[test]
+    fn test_iterator_share() {
+        let mut map: HamtMap<uint, uint, ShareStore<uint, uint>> = HamtMap::new();
+        let count = 1000u;
+
+        for i in range(0, count) {
+            map = map.plus(i, i);
+        }
+
+        let it = map.iter();
+        assert_eq!((count, Some(count)), it.size_hint());
+
+        let test: HashMap<uint, uint> = it.map(|(x, y)| (*x, *y)).collect();
+
+        assert_eq!(count, test.len());
+
+        for i in range(0, count) {
+            assert_eq!(test.find(&i), Some(&i));
+        }
+    }
 
     #[test]
     fn test_insert_share() { Test::test_insert(HamtMap::<uint, uint, ShareStoreU64>::new()); }
@@ -1490,5 +1648,49 @@ mod tests {
     #[bench]
     fn bench_remove_share_50000(bh: &mut BenchHarness) {
         Test::bench_remove(HamtMap::<uint, uint, ShareStoreU64>::new(), 50000, bh);
+    }
+
+    #[bench]
+    fn bench_iterate_share_10(bh: &mut BenchHarness) {
+        bench_iterator_share(HamtMap::<uint, uint, ShareStoreU64>::new(), 10, bh);
+    }
+
+    #[bench]
+    fn bench_iterate_share_100(bh: &mut BenchHarness) {
+        bench_iterator_share(HamtMap::<uint, uint, ShareStoreU64>::new(), 100, bh);
+    }
+
+    #[bench]
+    fn bench_iterate_share_1000(bh: &mut BenchHarness) {
+        bench_iterator_share(HamtMap::<uint, uint, ShareStoreU64>::new(), 1000, bh);
+    }
+
+    #[bench]
+    fn bench_iterate_share_50000(bh: &mut BenchHarness) {
+        bench_iterator_share(HamtMap::<uint, uint, ShareStoreU64>::new(), 50000, bh);
+    }
+
+    fn bench_iterator_copy(mut map: HamtMap<uint, uint, CopyStoreU64>,
+                           size: uint,
+                           bh: &mut BenchHarness) {
+        for i in range(0, size) {
+            map = map.plus(i, i);
+        }
+
+        bh.iter(|| {
+            for _ in map.iter() {}
+        })
+    }
+
+    fn bench_iterator_share(mut map: HamtMap<uint, uint, ShareStoreU64>,
+                            size: uint,
+                            bh: &mut BenchHarness) {
+        for i in range(0, size) {
+            map = map.plus(i, i);
+        }
+
+        bh.iter(|| {
+            for _ in map.iter() {}
+        })
     }
 }

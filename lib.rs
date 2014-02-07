@@ -49,4 +49,13 @@ pub trait PersistentMap<K: Send+Freeze, V: Send+Freeze>: Map<K, V> + Clone {
     /// map instance representing the map after the insertion. The second tuple element is true if
     /// the size of the map was changed by the operation and false otherwise.
     fn remove(self, key: &K) -> (Self, bool);
+
+
+    fn plus(self, key: K, val: V) -> Self {
+        self.insert(key, val).first()
+    }
+
+    fn minus(self, key: &K) -> Self {
+        self.remove(key).first()
+    }
 }
