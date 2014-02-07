@@ -1,7 +1,7 @@
 rs-persistent-datastructures
 ============================
 
-Mostly an implement a Hash Array Mapped Trie implementation based on the
+Mostly an implemention of a Hash Array Mapped Trie implementation based on the
 [Ideal Hash Trees](http://lampwww.epfl.ch/papers/idealhashtrees.pdf) paper by Phil Bagwell.
 This is the datastructure used by Scala's and Clojure's standard library as map implementation.
 The idea to use a special *collision node* to deal with hash collisions is taken from Clojure's
