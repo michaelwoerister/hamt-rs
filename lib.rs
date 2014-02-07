@@ -50,11 +50,14 @@ pub trait PersistentMap<K: Send+Freeze, V: Send+Freeze>: Map<K, V> + Clone {
     /// the size of the map was changed by the operation and false otherwise.
     fn remove(self, key: &K) -> (Self, bool);
 
-
+    /// Inserts a key-value pair into the map. Same as `insert()` but with a return type that's
+    /// better suited to chaining multiple calls together.
     fn plus(self, key: K, val: V) -> Self {
         self.insert(key, val).first()
     }
 
+    /// Removes a key-value pair from the map. Same as `remove()` but with a return type that's
+    /// better suited to chaining multiple call together
     fn minus(self, key: &K) -> Self {
         self.remove(key).first()
     }
