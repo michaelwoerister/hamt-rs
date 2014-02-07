@@ -15,7 +15,7 @@ for i in range(0, size) {
     map = map.plus(i, i);
 }
 
-if map.find(&0) {
+if map.find(&0) == Some(1) {
     ...
 }
 
