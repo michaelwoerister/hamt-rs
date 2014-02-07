@@ -21,6 +21,11 @@ if map.find(&0) == Some(1) {
 
 let (without_10, size_changed_10) = map.remove(&10);
 let (without_20, size_changed_20) = map.remove(&20);
+
+for (k, v) in map.iter() {
+    ...
+}
+
 ```
 
 ## Performance
