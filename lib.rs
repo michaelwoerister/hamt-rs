@@ -26,14 +26,21 @@
 
 #[feature(macro_rules)];
 
+#[cfg(test)]
 extern mod extra;
+
 extern mod sync;
 
-pub mod hamt;
-pub mod rbtree;
+pub use hamt::HamtMapIterator;
 
+mod hamt;
 mod item_store;
+
+#[cfg(test)]
 mod test;
+
+#[cfg(test)]
+mod rbtree;
 
 /// A trait to represent persistent maps. Objects implementing this trait are supposed to be
 /// cheaply copyable. Typically they can be seen as a kind of smart pointer with similar performance
@@ -62,3 +69,6 @@ pub trait PersistentMap<K: Send+Freeze, V: Send+Freeze>: Map<K, V> + Clone {
         self.remove(key).first()
     }
 }
+
+pub type HamtMap<K, V> = hamt::HamtMap<K, V, item_store::ShareStore<K, V>>;
+pub type CloningHamtMap<K, V> = hamt::HamtMap<K, V, item_store::CopyStore<K, V>>;
