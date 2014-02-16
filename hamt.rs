@@ -291,9 +291,9 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
 
     // The size in bytes of one node entry, containing any necessary padding bytes.
     fn node_entry_size() -> uint {
-        ::std::num::max(
+        ::std::cmp::max(
             mem::size_of::<IS>(),
-            ::std::num::max(
+            ::std::cmp::max(
                 mem::size_of::<Arc<~[IS]>>(),
                 mem::size_of::<NodeRef<K, V, IS>>(),
             )
@@ -358,13 +358,13 @@ impl<K, V, IS> UnsafeNode<K, V, IS> {
         // destroy the contained object, trick from Rc
         match self.get_entry_mut(index) {
             ItemEntryMutRef(item_ref) => {
-                let _ = ptr::read_ptr(ptr::to_unsafe_ptr(item_ref));
+                let _ = ptr::read(cast::transmute_immut_unsafe(item_ref));
             }
             CollisionEntryMutRef(item_ref) => {
-                let _ = ptr::read_ptr(ptr::to_unsafe_ptr(item_ref));
+                let _ = ptr::read(cast::transmute_immut_unsafe(item_ref));
             }
             SubTreeEntryMutRef(item_ref) => {
-                let _ = ptr::read_ptr(ptr::to_unsafe_ptr(item_ref));
+                let _ = ptr::read(cast::transmute_immut_unsafe(item_ref));
             }
         }
     }
@@ -1376,6 +1376,73 @@ Iterator<(&'a K, &'a V)> for HamtMapIterator<'a, K, V, IS> {
         (self.len, Some(self.len))
     }
 }
+
+
+
+//=-------------------------------------------------------------------------------------------------
+// HamtSet
+//=------------------------------------------------------------------------------------------------
+struct HamtSet<V> {
+    data: HamtMap<V, (), ShareStore<V, ()>>
+}
+
+// Set for HamtSet
+impl<V: Send+Freeze+Eq+Hash>
+Set<V> for HamtSet<V> {
+    fn contains(&self, value: &V) -> bool {
+        self.data.contains_key(value)
+    }
+
+    fn is_disjoint(&self, other: &HamtSet<V>) -> bool {
+        for (v, _) in self.data.iter() {
+            if other.contains(v) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    fn is_subset(&self, other: &HamtSet<V>) -> bool {
+        if self.len() > other.len() {
+            return false;
+        }
+
+        for (v, _) in self.data.iter() {
+            if !other.contains(v) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    fn is_superset(&self, other: &HamtSet<V>) -> bool {
+        other.is_subset(self)
+    }
+}
+
+// Clone for HamtSet
+impl<V: Hash+Eq+Send+Freeze>
+Clone for HamtSet<V> {
+
+    fn clone(&self) -> HamtSet<V> {
+        HamtSet {
+            data: self.data.clone()
+        }
+    }
+}
+
+// Container for HamtSet
+impl<V: Hash+Eq+Send+Freeze>
+Container for HamtSet<V> {
+
+    fn len(&self) -> uint {
+        self.data.len()
+    }
+}
+
+
 
 //=-------------------------------------------------------------------------------------------------
 // Utility functions
