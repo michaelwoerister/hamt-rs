@@ -19,6 +19,7 @@
 // THE SOFTWARE.
 
 use sync::Arc;
+use std::hash::Hash;
 use PersistentMap;
 use item_store::{ItemStore, CopyStore, ShareStore};
 
@@ -612,8 +613,8 @@ impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone, IS: ItemStore<K, V>
 #[cfg(test)]
 mod tests {
     use super::RedBlackTree;
-    use test::Test;
-    use extra::test::BenchHarness;
+    use testing::Test;
+    use test::BenchHarness;
     use item_store::{CopyStore, ShareStore};
 
     #[test]

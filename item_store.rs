@@ -36,8 +36,8 @@ impl<K: Send+Freeze, V: Send+Freeze> ShareStore<K, V> {
 }
 
 impl<K: Send+Freeze, V: Send+Freeze> ItemStore<K, V> for ShareStore<K, V> {
-    fn key<'a>(&'a self) -> &'a K { self.store.get().first_ref() }
-    fn val<'a>(&'a self) -> &'a V { self.store.get().second_ref() }
+    fn key<'a>(&'a self) -> &'a K { self.store.get().ref0() }
+    fn val<'a>(&'a self) -> &'a V { self.store.get().ref1() }
 }
 
 impl<K: Send+Freeze, V: Send+Freeze> Clone for ShareStore<K, V> {

@@ -24,12 +24,20 @@
 //! information see [Wikipedia](https://en.wikipedia.org/wiki/Persistent_data_structure) for
 //! example.
 
+#[feature(default_type_params)];
 #[feature(macro_rules)];
+#[allow(deprecated_owned_vector)];
 
 #[cfg(test)]
-extern crate extra;
+extern crate test;
+#[cfg(test)]
+extern crate collections;
+#[cfg(test)]
+extern crate rand;
 
 extern crate sync;
+
+use std::hash::sip::SipHasher;
 
 pub use hamt::HamtMapIterator;
 
@@ -37,10 +45,12 @@ mod hamt;
 mod item_store;
 
 #[cfg(test)]
-mod test;
+mod testing;
 
 #[cfg(test)]
 mod rbtree;
+
+
 
 /// A trait to represent persistent maps. Objects implementing this trait are supposed to be
 /// cheaply copyable. Typically they can be seen as a kind of smart pointer with similar performance
@@ -60,18 +70,18 @@ pub trait PersistentMap<K, V>: Map<K, V> + Clone {
     /// Inserts a key-value pair into the map. Same as `insert()` but with a return type that's
     /// better suited to chaining multiple calls together.
     fn plus(self, key: K, val: V) -> Self {
-        self.insert(key, val).first()
+        self.insert(key, val).val0()
     }
 
     /// Removes a key-value pair from the map. Same as `remove()` but with a return type that's
     /// better suited to chaining multiple call together
     fn minus(self, key: &K) -> Self {
-        self.remove(key).first()
+        self.remove(key).val0()
     }
 }
 
-pub type HamtMap<K, V> = hamt::HamtMap<K, V, item_store::ShareStore<K, V>>;
-pub type CloningHamtMap<K, V> = hamt::HamtMap<K, V, item_store::CopyStore<K, V>>;
+pub type HamtMap<K, V, H=SipHasher> = hamt::HamtMap<K, V, item_store::ShareStore<K, V>, H>;
+pub type CloningHamtMap<K, V, H=SipHasher> = hamt::HamtMap<K, V, item_store::CopyStore<K, V>, H>;
 
 
 /// A trait to represent persistent sets. Objects implementing this trait are supposed to be
@@ -91,12 +101,12 @@ pub trait PersistentSet<K>: Set<K> + Clone {
     /// Inserts a value into the set. Same as `insert()` but with a return type that's
     /// better suited to chaining multiple calls together.
     fn plus(self, key: K) -> Self {
-        self.insert(key).first()
+        self.insert(key).val0()
     }
 
     /// Removes a value from the set. Same as `remove()` but with a return type that's
     /// better suited to chaining multiple call together
     fn minus(self, key: &K) -> Self {
-        self.remove(key).first()
+        self.remove(key).val0()
     }
 }
