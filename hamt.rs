@@ -29,9 +29,10 @@ use std::hash::{Hasher, Hash};
 use std::intrinsics;
 use std::mem;
 use std::ptr;
-use std::vec;
+use std::vec::Vec;
 use std::sync::atomics::{AtomicUint, Acquire, Release};
 use std::rt::global_heap::{exchange_malloc, exchange_free};
+use std::kinds::Share;
 
 use sync::Arc;
 use PersistentMap;
@@ -54,7 +55,7 @@ enum NodeRefBorrowResult<'a, K, V, IS, H> {
     SharedNode(&'a UnsafeNode<K, V, IS, H>),
 }
 
-impl<K: Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>> NodeRef<K, V, IS, H> {
+impl<K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>> NodeRef<K, V, IS, H> {
 
     fn borrow<'a>(&'a self) -> &'a UnsafeNode<K, V, IS, H> {
         unsafe {
@@ -164,7 +165,7 @@ enum NodeEntryRef<'a, K, V, IS, H> {
     SubTreeEntryRef(&'a NodeRef<K, V, IS, H>)
 }
 
-impl<'a, K: Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>, H> NodeEntryRef<'a, K, V, IS, H> {
+impl<'a, K: Send+Share, V: Send+Share, IS: ItemStore<K, V>, H> NodeEntryRef<'a, K, V, IS, H> {
     // Clones the contents of a NodeEntryRef into a NodeEntryOwned value to be used elsewhere.
     fn clone_out(&self) -> NodeEntryOwned<K, V, IS, H> {
         match *self {
@@ -195,7 +196,7 @@ enum NodeEntryOwned<K, V, IS, H> {
 // safe space and---later on during searches---time.
 enum RemovalResult<K, V, IS, H> {
     // Don't do anything
-    NoChange,
+    NoSenderge,
     // Replace the sub-tree entry with another sub-tree entry pointing to the given node
     ReplaceSubTree(NodeRef<K, V, IS, H>),
     // Collapse the sub-tree into a singe-item entry
@@ -372,7 +373,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
 }
 
 // impl UnsafeNode (continued)
-impl<K: Eq+Send+Freeze+Hash<S>, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>>
+impl<K: Eq+Send+Share+Hash<S>, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>>
 UnsafeNode<K, V, IS, H> {
     // Insert a new key-value pair into the tree. The existing tree is not modified and a new tree
     // is created. This new tree will share most nodes with the existing one.
@@ -450,7 +451,7 @@ UnsafeNode<K, V, IS, H> {
                     None => {
                         *insertion_count = 1;
 
-                        let mut new_items = vec::with_capacity(items.len() + 1);
+                        let mut new_items = Vec::with_capacity(items.len() + 1);
                         new_items.push(new_kvp);
                         new_items.push_all(items.as_slice());
                         new_items
@@ -459,7 +460,7 @@ UnsafeNode<K, V, IS, H> {
                         *insertion_count = 0;
 
                         let item_count = items.len();
-                        let mut new_items = vec::with_capacity(item_count);
+                        let mut new_items = Vec::with_capacity(item_count);
 
                         if position > 0 {
                             new_items.push_all(items.slice_to(position));
@@ -572,7 +573,7 @@ UnsafeNode<K, V, IS, H> {
                     None => {
                         *insertion_count = 1;
 
-                        let mut new_items = vec::with_capacity(items.len() + 1);
+                        let mut new_items = Vec::with_capacity(items.len() + 1);
                         new_items.push(new_kvp);
                         new_items.push_all(items.as_slice());
                         new_items
@@ -581,7 +582,7 @@ UnsafeNode<K, V, IS, H> {
                         *insertion_count = 0;
 
                         let item_count = items.len();
-                        let mut new_items = vec::with_capacity(item_count);
+                        let mut new_items = Vec::with_capacity(item_count);
 
                         if position > 0 {
                             new_items.push_all(items.slice_to(position));
@@ -649,7 +650,7 @@ UnsafeNode<K, V, IS, H> {
 
         if (self.mask & (1 << local_key)) == 0 {
             *removal_count = 0;
-            return NoChange;
+            return NoSenderge;
         }
 
         let index = get_index(self.mask, local_key);
@@ -661,7 +662,7 @@ UnsafeNode<K, V, IS, H> {
                     self.collapse_kill_or_change(local_key, index)
                 } else {
                     *removal_count = 0;
-                    NoChange
+                    NoSenderge
                 }
             }
             CollisionEntryRef(items_ref) => {
@@ -672,7 +673,7 @@ UnsafeNode<K, V, IS, H> {
                 match position {
                     None => {
                         *removal_count = 0;
-                        NoChange
+                        NoSenderge
                     },
                     Some(position) => {
                         *removal_count = 1;
@@ -681,7 +682,7 @@ UnsafeNode<K, V, IS, H> {
                         // The new entry can either still be a collision node, or it can be a simple
                         // single-item node if the hash collision has been resolved by the removal
                         let new_entry = if item_count > 1 {
-                            let mut new_items = vec::with_capacity(item_count);
+                            let mut new_items = Vec::with_capacity(item_count);
 
                             if position > 0 {
                                 new_items.push_all(items.slice_to(position));
@@ -712,7 +713,7 @@ UnsafeNode<K, V, IS, H> {
                                                           key,
                                                           removal_count);
                 match result {
-                    NoChange => NoChange,
+                    NoSenderge => NoSenderge,
                     ReplaceSubTree(x) => {
                         ReplaceSubTree(self.copy_with_new_entry(local_key, SubTreeEntryOwned(x)))
                     }
@@ -745,13 +746,13 @@ UnsafeNode<K, V, IS, H> {
 
         if (self.mask & (1 << local_key)) == 0 {
             *removal_count = 0;
-            return NoChange;
+            return NoSenderge;
         }
 
         let index = get_index(self.mask, local_key);
 
         enum Action<K, V, IS, H> {
-            CollapseKillOrChange,
+            CollapseKillOrSenderge,
             NoAction,
             ReplaceEntry(NodeEntryOwned<K, V, IS, H>)
         }
@@ -760,7 +761,7 @@ UnsafeNode<K, V, IS, H> {
             ItemEntryMutRef(existing_kvp_ref) => {
                 if *existing_kvp_ref.key() == *key {
                     *removal_count = 1;
-                    CollapseKillOrChange
+                    CollapseKillOrSenderge
                 } else {
                     *removal_count = 0;
                     NoAction
@@ -783,7 +784,7 @@ UnsafeNode<K, V, IS, H> {
                         // The new entry can either still be a collision node, or it can be a simple
                         // single-item node if the hash collision has been resolved by the removal
                         let new_entry = if item_count > 1 {
-                            let mut new_items = vec::with_capacity(item_count);
+                            let mut new_items = Vec::with_capacity(item_count);
 
                             if position > 0 {
                                 new_items.push_all(items.slice_to(position));
@@ -820,7 +821,7 @@ UnsafeNode<K, V, IS, H> {
                 };
 
                 match result {
-                    NoChange => NoAction,
+                    NoSenderge => NoAction,
                     ReplaceSubTree(x) => {
                         ReplaceEntry(SubTreeEntryOwned(x))
                     }
@@ -832,18 +833,18 @@ UnsafeNode<K, V, IS, H> {
                         ReplaceEntry(ItemEntryOwned(kvp))
                     },
                     KillSubTree => {
-                        CollapseKillOrChange
+                        CollapseKillOrSenderge
                     }
                 }
             }
         };
 
         match action {
-            NoAction => NoChange,
-            CollapseKillOrChange => self.collapse_kill_or_change_in_place(local_key, index),
+            NoAction => NoSenderge,
+            CollapseKillOrSenderge => self.collapse_kill_or_change_in_place(local_key, index),
             ReplaceEntry(new_entry) => {
                 self.insert_entry_in_place(local_key, new_entry);
-                NoChange
+                NoSenderge
             }
         }
     }
@@ -882,7 +883,7 @@ UnsafeNode<K, V, IS, H> {
 
         if new_entry_count > 1 {
             self.remove_entry_in_place(local_key);
-            NoChange
+            NoSenderge
         } else if new_entry_count == 1 {
             let other_index = 1 - entry_index;
 
@@ -894,7 +895,7 @@ UnsafeNode<K, V, IS, H> {
             }
 
             self.remove_entry_in_place(local_key);
-            NoChange
+            NoSenderge
         } else {
             assert!(new_entry_count == 0);
             KillSubTree
@@ -1124,7 +1125,7 @@ pub struct HamtMap<K, V, IS, H> {
 }
 
 // impl HamtMap
-impl<K: Eq+Send+Freeze+Hash<S>, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
+impl<K: Eq+Send+Share+Hash<S>, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
 HamtMap<K, V, IS, H> {
 
     pub fn new(hasher: H) -> HamtMap<K, V, IS, H> {
@@ -1227,7 +1228,7 @@ HamtMap<K, V, IS, H> {
         let new_element_count = element_count - removal_count;
 
         (match removal_result {
-            NoChange => HamtMap {
+            NoSenderge => HamtMap {
                 root: root,
                 hasher: hasher,
                 element_count: new_element_count
@@ -1262,7 +1263,7 @@ HamtMap<K, V, IS, H> {
 }
 
 // Clone for HamtMap
-impl<K: Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
+impl<K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
 Clone for HamtMap<K, V, IS, H> {
 
     fn clone(&self) -> HamtMap<K, V, IS, H> {
@@ -1275,7 +1276,7 @@ Clone for HamtMap<K, V, IS, H> {
 }
 
 // Container for HamtMap
-impl<K: Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>>
+impl<K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>>
 Container for HamtMap<K, V, IS, H> {
 
     fn len(&self) -> uint {
@@ -1284,7 +1285,7 @@ Container for HamtMap<K, V, IS, H> {
 }
 
 // Map for HamtMap
-impl<K: Eq+Send+Freeze+Hash<S>, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
+impl<K: Eq+Send+Share+Hash<S>, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
 Map<K, V> for HamtMap<K, V, IS, H> {
 
     fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
@@ -1293,7 +1294,7 @@ Map<K, V> for HamtMap<K, V, IS, H> {
 }
 
 // PersistentMap for HamtMap<CopyStore>
-impl<K: Eq+Send+Freeze+Clone+Hash<S>, V: Send+Freeze+Clone, S, H: Hasher<S>+Clone>
+impl<K: Eq+Send+Share+Clone+Hash<S>, V: Send+Share+Clone, S, H: Hasher<S>+Clone>
 PersistentMap<K, V> for HamtMap<K, V, CopyStore<K, V>, H> {
 
     fn insert(self, key: K, value: V) -> (HamtMap<K, V, CopyStore<K, V>, H>, bool) {
@@ -1306,7 +1307,7 @@ PersistentMap<K, V> for HamtMap<K, V, CopyStore<K, V>, H> {
 }
 
 // PersistentMap for HamtMap<ShareStore>
-impl<K: Eq+Send+Freeze+Hash<S>, V: Send+Freeze, S, H: Hasher<S>+Clone>
+impl<K: Eq+Send+Share+Hash<S>, V: Send+Share, S, H: Hasher<S>+Clone>
 PersistentMap<K, V> for HamtMap<K, V, ShareStore<K, V>, H> {
 
     fn insert(self, key: K, value: V) -> (HamtMap<K, V, ShareStore<K, V>, H>, bool) {
@@ -1331,12 +1332,12 @@ enum IteratorNodeRef<'a, K, V, IS, H> {
 }
 
 pub struct HamtMapIterator<'a, K, V, IS, H> {
-    priv node_stack: [(IteratorNodeRef<'a, K, V, IS, H>, int), .. LAST_LEVEL + 2],
-    priv stack_size: uint,
-    priv len: uint,
+    node_stack: [(IteratorNodeRef<'a, K, V, IS, H>, int), .. LAST_LEVEL + 2],
+    stack_size: uint,
+    len: uint,
 }
 
-impl<'a, K: Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>>
+impl<'a, K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>>
 HamtMapIterator<'a, K, V, IS, H> {
 
     fn new<'a>(map: &'a HamtMap<K, V, IS, H>) -> HamtMapIterator<'a, K, V, IS, H> {
@@ -1351,7 +1352,7 @@ HamtMapIterator<'a, K, V, IS, H> {
     }
 }
 
-impl<'a, K: Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>>
+impl<'a, K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>>
 Iterator<(&'a K, &'a V)> for HamtMapIterator<'a, K, V, IS, H> {
 
     fn next(&mut self) -> Option<(&'a K, &'a V)> {
@@ -1418,7 +1419,7 @@ struct HamtSet<V, H> {
 }
 
 // Set for HamtSet
-impl<V: Send+Freeze+Eq+Hash<S>, S, H: Hasher<S>+Clone>
+impl<V: Send+Share+Eq+Hash<S>, S, H: Hasher<S>+Clone>
 Set<V> for HamtSet<V, H> {
     fn contains(&self, value: &V) -> bool {
         self.data.contains_key(value)
@@ -1454,7 +1455,7 @@ Set<V> for HamtSet<V, H> {
 }
 
 // Clone for HamtSet
-impl<V: Eq+Send+Freeze, S, H: Hasher<S>+Clone>
+impl<V: Eq+Send+Share, S, H: Hasher<S>+Clone>
 Clone for HamtSet<V, H> {
 
     fn clone(&self) -> HamtSet<V, H> {
@@ -1465,7 +1466,7 @@ Clone for HamtSet<V, H> {
 }
 
 // Container for HamtSet
-impl<V: Eq+Send+Freeze, S, H: Hasher<S>>
+impl<V: Eq+Send+Share, S, H: Hasher<S>>
 Container for HamtSet<V, H> {
 
     fn len(&self) -> uint {

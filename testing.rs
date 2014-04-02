@@ -159,7 +159,7 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
 
     pub fn bench_find(empty: TPersistentMap, count: uint, bh: &mut BenchHarness) {
         let mut rng = StdRng::new();
-        let values = ::std::vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
+        let values = ::std::Vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
         let mut map = empty;
 
         for &x in values.iter() {
@@ -176,7 +176,7 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
 
     pub fn bench_insert(empty: TPersistentMap, count: uint, bh: &mut BenchHarness) {
         let mut rng = StdRng::new();
-        let values = ::std::vec::from_fn(count + BENCH_INSERT_COUNT, |_| rand::Rand::rand(&mut rng));
+        let values = ::std::Vec::from_fn(count + BENCH_INSERT_COUNT, |_| rand::Rand::rand(&mut rng));
         let mut map = empty;
 
         for i in range(0u, count) {
@@ -196,7 +196,7 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
 
     pub fn bench_remove(empty: TPersistentMap, count: uint, bh: &mut BenchHarness) {
         let mut rng = StdRng::new();
-        let values = ::std::vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
+        let values = ::std::Vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
         let mut map = empty;
 
         for &x in values.iter() {
@@ -215,7 +215,7 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
 
 fn bench_find_hashmap<T: MutableMap<u64, u64>>(empty: T, count: uint, bh: &mut BenchHarness) {
     let mut rng = StdRng::new();
-    let values = ::std::vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
+    let values = ::std::Vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
     let mut map = empty;
 
     for &x in values.iter() {
@@ -232,7 +232,7 @@ fn bench_find_hashmap<T: MutableMap<u64, u64>>(empty: T, count: uint, bh: &mut B
 
 fn bench_insert_hashmap<T: MutableMap<u64, u64> + Clone>(empty: T, count: uint, bh: &mut BenchHarness) {
     let mut rng = StdRng::new();
-    let values = ::std::vec::from_fn(count + BENCH_INSERT_COUNT, |_| rand::Rand::rand(&mut rng));
+    let values = ::std::Vec::from_fn(count + BENCH_INSERT_COUNT, |_| rand::Rand::rand(&mut rng));
     let mut map = empty;
 
     for i in range(0u, count) {
@@ -254,7 +254,7 @@ fn bench_clone_hashmap<T: MutableMap<u64, u64>+Clone>(empty: T,
                                                         count: uint,
                                                         bh: &mut BenchHarness) {
     let mut rng = StdRng::new();
-    let values = ::std::vec::from_fn(count + BENCH_INSERT_COUNT, |_| rng.gen());
+    let values = ::std::Vec::from_fn(count + BENCH_INSERT_COUNT, |_| rng.gen());
     let mut map = empty;
 
     for i in range(0u, count) {
@@ -269,7 +269,7 @@ fn bench_clone_hashmap<T: MutableMap<u64, u64>+Clone>(empty: T,
 
 fn bench_remove_hashmap<T: MutableMap<u64, u64>>(empty: T, count: uint, bh: &mut BenchHarness) {
     let mut rng = StdRng::new();
-    let values = ::std::vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
+    let values = ::std::Vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
     let mut map = empty;
 
     for &x in values.iter() {

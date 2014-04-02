@@ -24,9 +24,9 @@
 //! information see [Wikipedia](https://en.wikipedia.org/wiki/Persistent_data_structure) for
 //! example.
 
-#[feature(default_type_params)];
-#[feature(macro_rules)];
-#[allow(deprecated_owned_vector)];
+#![feature(default_type_params)]
+#![feature(macro_rules)]
+#![allow(deprecated_owned_vector)]
 
 #[cfg(test)]
 extern crate test;
