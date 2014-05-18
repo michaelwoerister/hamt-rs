@@ -1,10 +1,8 @@
 
-use rand;
 use rand::{Rng, StdRng};
-use std::iter::range;
 use collections::hashmap::HashMap;
 
-use test::BenchHarness;
+use test::Bencher;
 
 use PersistentMap;
 
@@ -127,7 +125,7 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
 
     pub fn random_insert_remove_stress_test(empty: TPersistentMap) {
         let mut reference: HashMap<u64, u64> = HashMap::new();
-        let mut rng = StdRng::new();
+        let mut rng = StdRng::new().ok().expect("Could not create random number generator");
 
         let mut map = empty;
 
@@ -155,67 +153,85 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
     }
 }
 
+fn create_random_std_hashmap(count: uint) -> HashMap<u64, u64> {
+    let mut hashmap = HashMap::<u64, u64>::new();
+    let mut rng = StdRng::new().ok().expect("Could not create random number generator");
+
+    while hashmap.len() < count {
+        let value = rng.gen();
+        hashmap.insert(value, value);
+    }
+
+    return hashmap;
+}
+
+
+fn create_unique_values(count: uint) -> Vec<u64> {
+    create_random_std_hashmap(count).keys().map(|x| *x).collect()
+}
+
+pub static mut results: [Option<u64>, ..1000000] = [None, ..1000000];
+
 impl<TPersistentMap: PersistentMap<u64, u64>> Test {
 
-    pub fn bench_find(empty: TPersistentMap, count: uint, bh: &mut BenchHarness) {
-        let mut rng = StdRng::new();
-        let values = ::std::vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
+    fn create_random_map(empty: TPersistentMap, count: uint) -> (TPersistentMap, Vec<u64>) {
+        let keys = create_unique_values(count);
         let mut map = empty;
 
-        for &x in values.iter() {
-            map = map.insert(x, x).val0();
+        for &x in keys.iter() {
+            map = map.plus(x, x);
         }
+
+        return (map, keys);
+    }
+
+    pub fn bench_find(empty: TPersistentMap, count: uint, bh: &mut Bencher) {
+        let (map, keys) = Test::create_random_map(empty, count);
 
         bh.iter(|| {
             for i in range(0u, BENCH_FIND_COUNT) {
-                let val = values[i % count];
-                let _ = map.find(&val);
+                let val = keys.get(i % count);
+                // lets make about of half the lookups fail
+                let val = val + (i as u64 & 1);
+
+                unsafe {
+                    match map.find(&val) {
+                        Some(&x) => results[i] = Some(x),
+                        None => results[i] = None,
+                    }
+                }
             }
         })
     }
 
-    pub fn bench_insert(empty: TPersistentMap, count: uint, bh: &mut BenchHarness) {
-        let mut rng = StdRng::new();
-        let values = ::std::vec::from_fn(count + BENCH_INSERT_COUNT, |_| rand::Rand::rand(&mut rng));
-        let mut map = empty;
-
-        for i in range(0u, count) {
-            let x = values[i];
-            map = map.plus(x, x);
-        }
+    pub fn bench_insert(empty: TPersistentMap, count: uint, bh: &mut Bencher) {
+        let (map, keys) = Test::create_random_map(empty, count + BENCH_INSERT_COUNT);
 
         bh.iter(|| {
             let mut map1 = map.clone();
 
             for i in range(0u, BENCH_INSERT_COUNT) {
-                let val = values[count + i];
+                let val = *keys.get(count + i);
                 map1 = map1.plus(val, val);
             }
         })
     }
 
-    pub fn bench_remove(empty: TPersistentMap, count: uint, bh: &mut BenchHarness) {
-        let mut rng = StdRng::new();
-        let values = ::std::vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
-        let mut map = empty;
-
-        for &x in values.iter() {
-            map = map.insert(x, x).val0();
-        }
+    pub fn bench_remove(empty: TPersistentMap, count: uint, bh: &mut Bencher) {
+        let (map, keys) = Test::create_random_map(empty, count);
 
         bh.iter(|| {
             let mut map = map.clone();
 
             for x in ::std::iter::range_step(0, count as uint, 2) {
-                map = map.remove(&values[x]).val0();
+                map = map.minus(keys.get(x));
             }
         })
     }
 }
 
-fn bench_find_hashmap<T: MutableMap<u64, u64>>(empty: T, count: uint, bh: &mut BenchHarness) {
-    let mut rng = StdRng::new();
-    let values = ::std::vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
+fn bench_find_hashmap<T: MutableMap<u64, u64>>(empty: T, count: uint, bh: &mut Bencher) {
+    let values = create_unique_values(count);
     let mut map = empty;
 
     for &x in values.iter() {
@@ -224,19 +240,23 @@ fn bench_find_hashmap<T: MutableMap<u64, u64>>(empty: T, count: uint, bh: &mut B
 
     bh.iter(|| {
         for i in range(0u, BENCH_FIND_COUNT) {
-            let val = values[i % count];
-            let _ = map.find(&val);
+            let val = values.get(i % count);
+
+            unsafe {
+                match map.find(val) {
+                    Some(&x) => results[i] = Some(x),
+                    None => results[i] = None,
+                }
+            }
         }
     })
 }
 
-fn bench_insert_hashmap<T: MutableMap<u64, u64> + Clone>(empty: T, count: uint, bh: &mut BenchHarness) {
-    let mut rng = StdRng::new();
-    let values = ::std::vec::from_fn(count + BENCH_INSERT_COUNT, |_| rand::Rand::rand(&mut rng));
+fn bench_insert_hashmap<T: MutableMap<u64, u64> + Clone>(empty: T, count: uint, bh: &mut Bencher) {
+    let values = create_unique_values(count + BENCH_INSERT_COUNT);
     let mut map = empty;
 
-    for i in range(0u, count) {
-        let x = values[i];
+    for &x in values.iter() {
         map.insert(x, x);
     }
 
@@ -244,7 +264,7 @@ fn bench_insert_hashmap<T: MutableMap<u64, u64> + Clone>(empty: T, count: uint, 
         let mut map1 = map.clone();
 
         for i in range(0u, BENCH_INSERT_COUNT) {
-            let val = values[count + i];
+            let val = *values.get(count + i);
             map1.insert(val, val);
         }
     })
@@ -252,13 +272,11 @@ fn bench_insert_hashmap<T: MutableMap<u64, u64> + Clone>(empty: T, count: uint, 
 
 fn bench_clone_hashmap<T: MutableMap<u64, u64>+Clone>(empty: T,
                                                         count: uint,
-                                                        bh: &mut BenchHarness) {
-    let mut rng = StdRng::new();
-    let values = ::std::vec::from_fn(count + BENCH_INSERT_COUNT, |_| rng.gen());
+                                                        bh: &mut Bencher) {
+    let values = create_unique_values(count);
     let mut map = empty;
 
-    for i in range(0u, count) {
-        let x = values[i];
+    for &x in values.iter() {
         map.insert(x, x);
     }
 
@@ -267,9 +285,8 @@ fn bench_clone_hashmap<T: MutableMap<u64, u64>+Clone>(empty: T,
     })
 }
 
-fn bench_remove_hashmap<T: MutableMap<u64, u64>>(empty: T, count: uint, bh: &mut BenchHarness) {
-    let mut rng = StdRng::new();
-    let values = ::std::vec::from_fn(count, |_| rand::Rand::rand(&mut rng));
+fn bench_remove_hashmap<T: MutableMap<u64, u64>+Clone>(empty: T, count: uint, bh: &mut Bencher) {
+    let values = create_unique_values(count);
     let mut map = empty;
 
     for &x in values.iter() {
@@ -277,8 +294,10 @@ fn bench_remove_hashmap<T: MutableMap<u64, u64>>(empty: T, count: uint, bh: &mut
     }
 
     bh.iter(|| {
+        let mut map1 = map.clone();
+
         for x in ::std::iter::range_step(0, count, 2) {
-            map.remove(&values[x]);
+            map1.remove(values.get(x));
         }
     })
 }
@@ -291,17 +310,17 @@ fn bench_remove_hashmap<T: MutableMap<u64, u64>>(empty: T, count: uint, bh: &mut
 //=-------------------------------------------------------------------------------------------------
 
 #[bench]
-fn std_hashmap_find_10(bh: &mut BenchHarness) {
+fn std_hashmap_find_10(bh: &mut Bencher) {
     bench_find_hashmap(HashMap::<u64, u64>::new(), 10, bh);
 }
 
 #[bench]
-fn std_hashmap_find_1000(bh: &mut BenchHarness) {
+fn std_hashmap_find_1000(bh: &mut Bencher) {
     bench_find_hashmap(HashMap::<u64, u64>::new(), 1000, bh);
 }
 
 #[bench]
-fn std_hashmap_find_100000(bh: &mut BenchHarness) {
+fn std_hashmap_find_100000(bh: &mut Bencher) {
     bench_find_hashmap(HashMap::<u64, u64>::new(), 100000, bh);
 }
 
@@ -312,32 +331,32 @@ fn std_hashmap_find_100000(bh: &mut BenchHarness) {
 //=-------------------------------------------------------------------------------------------------
 
 #[bench]
-fn std_hashmap_insert_10(bh: &mut BenchHarness) {
+fn std_hashmap_insert_10(bh: &mut Bencher) {
     bench_insert_hashmap(HashMap::<u64, u64>::new(),10, bh);
 }
 
 #[bench]
-fn std_hashmap_insert_1000(bh: &mut BenchHarness) {
+fn std_hashmap_insert_1000(bh: &mut Bencher) {
     bench_insert_hashmap(HashMap::<u64, u64>::new(),1000, bh);
 }
 
 #[bench]
-fn std_hashmap_insert_100000(bh: &mut BenchHarness) {
+fn std_hashmap_insert_100000(bh: &mut Bencher) {
     bench_insert_hashmap(HashMap::<u64, u64>::new(),100000, bh);
 }
 
 #[bench]
-fn std_hashmap_clone_10(bh: &mut BenchHarness) {
+fn std_hashmap_clone_10(bh: &mut Bencher) {
     bench_clone_hashmap(HashMap::<u64, u64>::new(),10, bh);
 }
 
 #[bench]
-fn std_hashmap_clone_1000(bh: &mut BenchHarness) {
+fn std_hashmap_clone_1000(bh: &mut Bencher) {
     bench_clone_hashmap(HashMap::<u64, u64>::new(),1000, bh);
 }
 
 #[bench]
-fn std_hashmap_clone_100000(bh: &mut BenchHarness) {
+fn std_hashmap_clone_100000(bh: &mut Bencher) {
     bench_clone_hashmap(HashMap::<u64, u64>::new(),100000, bh);
 }
 
@@ -348,16 +367,16 @@ fn std_hashmap_clone_100000(bh: &mut BenchHarness) {
 //=-------------------------------------------------------------------------------------------------
 
 #[bench]
-fn std_hashmap_remove_10(bh: &mut BenchHarness) {
+fn std_hashmap_remove_10(bh: &mut Bencher) {
     bench_remove_hashmap(HashMap::<u64, u64>::new(),10, bh);
 }
 
 #[bench]
-fn std_hashmap_remove_1000(bh: &mut BenchHarness) {
+fn std_hashmap_remove_1000(bh: &mut Bencher) {
     bench_remove_hashmap(HashMap::<u64, u64>::new(),1000, bh);
 }
 
 #[bench]
-fn std_hashmap_remove_10000(bh: &mut BenchHarness) {
+fn std_hashmap_remove_10000(bh: &mut Bencher) {
     bench_remove_hashmap(HashMap::<u64, u64>::new(),10000, bh);
 }

@@ -30,7 +30,7 @@ for (k, v) in map.iter() {
 
 ## Performance
 Looks pretty good so far, for a fully persistent data structure. The benchmarks below where done on
-a Core i5 2400, with random numbers and the compile flags `-O --test -Zlto --target-cpu=corei7-avx`.
+a Core i5 2400, with random numbers and the compile flags `-O --test -Zlto -C target-cpu=corei7-avx`.
 I also turned off (commented out) the assertions in the code, which should not be necessary in a
 release build.
 
@@ -41,9 +41,17 @@ The red black is also persistent and implemented in rbtree.rs
 
 | ELEMENT COUNT | HAMT | REDBLACK TREE | HASHMAP |
 |:--------------|:----:|:-------------:|:-------:|
-| 10            | 43   | 18            | 50      |
-| 1000          | 52   | 75            | 57      |
-| 100000        | 78   | 305           | 55      |
+| 10            | 43   | 14            | 41      |
+| 1000          | 59   | 64            | 45      |
+| 100000        | 85   | 308           | 70      |
+
+In percent over std::HashMap (less than 100% means faster, more means slower than std::HashMap).
+
+| ELEMENT COUNT | HAMT | REDBLACK TREE | HASHMAP |
+|:--------------|:----:|:-------------:|:-------:|
+| 10            | 106% | 34%           | 100%    |
+| 1000          | 130% | 140%          | 100%    |
+| 100000        | 121% | 437%          | 100%    |
 
 Both persistent implementations are quite fast but don't scale as well as the std::HashMap.
 The HAMT is in the same ballpark as the std::HashMap, even for larger collections.
@@ -59,9 +67,17 @@ Times (in microseconds) for one thousand insertions into a collection with *ELEM
 
 | ELEMENT COUNT | HAMT | REDBLACK TREE | HASHMAP |
 |:--------------|:----:|:-------------:|:-------:|
-| 10            | 170  | 1501          | 162     |
-| 1000          | 188  | 1764          | 179     |
-| 100000        | 1206 | 3242          | 327     |
+| 10            | 186  | 1082          | 49      |
+| 1000          | 252  | 1284          | 60      |
+| 100000        | 1616 | 2756          | 76      |
+
+In percent over std::HashMap (less than 100% means faster, more means slower than std::HashMap).
+
+| ELEMENT COUNT | HAMT  | REDBLACK TREE | HASHMAP |
+|:--------------|:-----:|:-------------:|:-------:|
+| 10            | 377%  | 2198%         | 100%    |
+| 1000          | 417%  | 2127%         | 100%    |
+| 100000        | 2138% | 3646%         | 100%    |
 
 As can be seen, the HAMT holds up pretty well against the non-persistent std::HashMap.
 

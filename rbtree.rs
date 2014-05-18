@@ -71,8 +71,8 @@ impl<K, V, IS> Clone for NodeRef<K, V, IS> {
     }
 }
 
-fn new_node<K: Ord+Clone+Send+Freeze,
-            V: Clone+Send+Freeze,
+fn new_node<K: Ord+Clone+Send+Share,
+            V: Clone+Send+Share,
             IS: ItemStore<K, V>>(
                 color: Color,
                 left: NodeRef<K, V, IS>,
@@ -95,8 +95,8 @@ fn new_node<K: Ord+Clone+Send+Freeze,
     return node;
 }
 
-fn new_leaf<K: Ord+Clone+Send+Freeze,
-            V: Clone+Send+Freeze,
+fn new_leaf<K: Ord+Clone+Send+Share,
+            V: Clone+Send+Share,
             IS: ItemStore<K, V>>(
                 color: Color)
              -> NodeRef<K, V, IS> {
@@ -106,7 +106,7 @@ fn new_leaf<K: Ord+Clone+Send+Freeze,
     return leaf;
 }
 
-impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> NodeRef<K, V, IS> {
+impl<K: Ord+Clone+Send+Share, V: Clone+Send+Share, IS: ItemStore<K, V>> NodeRef<K, V, IS> {
 
     fn is_leaf(&self) -> bool {
         self.data.is_none()
@@ -114,7 +114,7 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> NodeRe
 
     fn get_data<'a>(&'a self) -> &'a NodeData<K, V, IS> {
         match self.data {
-            Some(ref data_ref) => data_ref.get(),
+            Some(ref data_ref) => data_ref.deref(),
             None => unreachable!()
         }
     }
@@ -147,7 +147,7 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> NodeRe
     fn find<'a>(&'a self, search_key: &K) -> Option<&'a V> {
         match self.data {
             Some(ref data_ref) => {
-                let data_ref = data_ref.get();
+                let data_ref = data_ref.deref();
 
                 if *search_key < *data_ref.item.key() {
                     data_ref.left.find(search_key)
@@ -398,7 +398,7 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> NodeRe
     // Deletes a key from this map
     fn delete(&self, search_key: &K, removal_count: &mut uint) -> NodeRef<K, V, IS> {
         // Finds the node to be removed
-        fn del<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>>(
+        fn del<K: Ord+Clone+Send+Share, V: Clone+Send+Share, IS: ItemStore<K, V>>(
             node: &NodeRef<K, V, IS>,
             search_key: &K,
             removal_count: &mut uint)
@@ -428,7 +428,7 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> NodeRe
         }
 
         // Removes this node. might leave behind a double-black node:
-        fn remove<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>>(
+        fn remove<K: Ord+Clone+Send+Share, V: Clone+Send+Share, IS: ItemStore<K, V>>(
             node: &NodeRef<K, V, IS>) -> NodeRef<K, V, IS> {
             assert!(!node.is_leaf());
 
@@ -493,8 +493,8 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> NodeRe
         }
 
         // Kills a double-black, or moves it to the top:
-        fn bubble<K: Ord+Clone+Send+Freeze,
-                  V: Clone+Send+Freeze,
+        fn bubble<K: Ord+Clone+Send+Share,
+                  V: Clone+Send+Share,
                   IS: ItemStore<K, V>>(
                     color: Color,
                     l: NodeRef<K, V, IS>,
@@ -509,8 +509,8 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> NodeRe
         }
 
         // Removes the max node:
-        fn remove_max<K: Ord+Clone+Send+Freeze,
-                      V: Clone+Send+Freeze,
+        fn remove_max<K: Ord+Clone+Send+Share,
+                      V: Clone+Send+Share,
                       IS: ItemStore<K, V>>(
                         node: &NodeRef<K, V, IS>)
                      -> NodeRef<K, V, IS> {
@@ -537,7 +537,7 @@ struct RedBlackTree<K, V, IS> {
     len: uint,
 }
 
-impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> RedBlackTree<K, V, IS> {
+impl<K: Ord+Clone+Send+Share, V: Clone+Send+Share, IS: ItemStore<K, V>> RedBlackTree<K, V, IS> {
     pub fn new() -> RedBlackTree<K, V, IS> {
         RedBlackTree {
             root: new_leaf(Black),
@@ -572,10 +572,10 @@ impl<K: Ord+Clone+Send+Freeze, V: Clone+Send+Freeze, IS: ItemStore<K, V>> RedBla
     // }
 }
 
-impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone> PersistentMap<K, V> for RedBlackTree<K, V, CopyStore<K, V>> {
+impl<K: Hash+Eq+Send+Share+Ord+Clone, V: Send+Share+Clone> PersistentMap<K, V> for RedBlackTree<K, V, CopyStore<K, V>> {
     #[inline]
     fn insert(self, key: K, value: V) -> (RedBlackTree<K, V, CopyStore<K, V>>, bool) {
-        self.insert(CopyStore { key: key, val: value })
+        self.insert(CopyStore::new(key, value))
     }
 
     #[inline]
@@ -584,7 +584,7 @@ impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone> PersistentMap<K, V>
     }
 }
 
-impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone> PersistentMap<K, V> for RedBlackTree<K, V, ShareStore<K, V>> {
+impl<K: Hash+Eq+Send+Share+Ord+Clone, V: Send+Share+Clone> PersistentMap<K, V> for RedBlackTree<K, V, ShareStore<K, V>> {
     #[inline]
     fn insert(self, key: K, value: V) -> (RedBlackTree<K, V, ShareStore<K, V>>, bool) {
         self.insert(ShareStore::new(key, value))
@@ -596,14 +596,14 @@ impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone> PersistentMap<K, V>
     }
 }
 
-impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone, IS: ItemStore<K, V>> Map<K, V> for RedBlackTree<K, V, IS> {
+impl<K: Hash+Eq+Send+Share+Ord+Clone, V: Send+Share+Clone, IS: ItemStore<K, V>> Map<K, V> for RedBlackTree<K, V, IS> {
     #[inline]
     fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
         self.find(key)
     }
 }
 
-impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone, IS: ItemStore<K, V>> Container for RedBlackTree<K, V, IS> {
+impl<K: Hash+Eq+Send+Share+Ord+Clone, V: Send+Share+Clone, IS: ItemStore<K, V>> Container for RedBlackTree<K, V, IS> {
     #[inline]
     fn len(&self) -> uint {
         self.len
@@ -614,7 +614,7 @@ impl<K: Hash+Eq+Send+Freeze+Ord+Clone, V: Send+Freeze+Clone, IS: ItemStore<K, V>
 mod tests {
     use super::RedBlackTree;
     use testing::Test;
-    use test::BenchHarness;
+    use test::Bencher;
     use item_store::{CopyStore, ShareStore};
 
     #[test]
@@ -627,63 +627,48 @@ mod tests {
     fn test_remove_copy() { Test::test_remove(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new()); }
 
     #[bench]
-    fn bench_insert_copy_10(bh: &mut BenchHarness) {
+    fn bench_insert_copy_10(bh: &mut Bencher) {
         Test::bench_insert(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 10, bh);
     }
 
     #[bench]
-    fn bench_insert_copy_100(bh: &mut BenchHarness) {
-        Test::bench_insert(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 100, bh);
-    }
-
-    #[bench]
-    fn bench_insert_copy_1000(bh: &mut BenchHarness) {
+    fn bench_insert_copy_1000(bh: &mut Bencher) {
         Test::bench_insert(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 1000, bh);
     }
 
     #[bench]
-    fn bench_insert_copy_50000(bh: &mut BenchHarness) {
-        Test::bench_insert(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 50000, bh);
+    fn bench_insert_copy_100000(bh: &mut Bencher) {
+        Test::bench_insert(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 100000, bh);
     }
 
     #[bench]
-    fn bench_find_copy_10(bh: &mut BenchHarness) {
+    fn bench_find_copy_10(bh: &mut Bencher) {
         Test::bench_find(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 10, bh);
     }
 
     #[bench]
-    fn bench_find_copy_100(bh: &mut BenchHarness) {
-        Test::bench_find(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 100, bh);
-    }
-
-    #[bench]
-    fn bench_find_copy_1000(bh: &mut BenchHarness) {
+    fn bench_find_copy_1000(bh: &mut Bencher) {
         Test::bench_find(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 1000, bh);
     }
 
     #[bench]
-    fn bench_find_copy_50000(bh: &mut BenchHarness) {
-        Test::bench_find(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 50000, bh);
+    fn bench_find_copy_100000(bh: &mut Bencher) {
+        Test::bench_find(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 100000, bh);
     }
 
     #[bench]
-    fn bench_remove_copy_10(bh: &mut BenchHarness) {
+    fn bench_remove_copy_10(bh: &mut Bencher) {
         Test::bench_remove(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 10, bh);
     }
 
     #[bench]
-    fn bench_remove_copy_100(bh: &mut BenchHarness) {
-        Test::bench_remove(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 100, bh);
-    }
-
-    #[bench]
-    fn bench_remove_copy_1000(bh: &mut BenchHarness) {
+    fn bench_remove_copy_1000(bh: &mut Bencher) {
         Test::bench_remove(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 1000, bh);
     }
 
     #[bench]
-    fn bench_remove_copy_50000(bh: &mut BenchHarness) {
-        Test::bench_remove(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 50000, bh);
+    fn bench_remove_copy_100000(bh: &mut Bencher) {
+        Test::bench_remove(RedBlackTree::<u64, u64, CopyStore<u64, u64>>::new(), 100000, bh);
     }
 
     #[test]
@@ -696,62 +681,47 @@ mod tests {
     fn test_remove_shared() { Test::test_remove(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new()); }
 
     #[bench]
-    fn bench_insert_shared_10(bh: &mut BenchHarness) {
+    fn bench_insert_shared_10(bh: &mut Bencher) {
         Test::bench_insert(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 10, bh);
     }
 
     #[bench]
-    fn bench_insert_shared_100(bh: &mut BenchHarness) {
-        Test::bench_insert(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 100, bh);
-    }
-
-    #[bench]
-    fn bench_insert_shared_1000(bh: &mut BenchHarness) {
+    fn bench_insert_shared_1000(bh: &mut Bencher) {
         Test::bench_insert(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 1000, bh);
     }
 
     #[bench]
-    fn bench_insert_shared_50000(bh: &mut BenchHarness) {
-        Test::bench_insert(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 50000, bh);
+    fn bench_insert_shared_100000(bh: &mut Bencher) {
+        Test::bench_insert(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 100000, bh);
     }
 
     #[bench]
-    fn bench_find_shared_10(bh: &mut BenchHarness) {
+    fn bench_find_shared_10(bh: &mut Bencher) {
         Test::bench_find(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 10, bh);
     }
 
     #[bench]
-    fn bench_find_shared_100(bh: &mut BenchHarness) {
-        Test::bench_find(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 100, bh);
-    }
-
-    #[bench]
-    fn bench_find_shared_1000(bh: &mut BenchHarness) {
+    fn bench_find_shared_1000(bh: &mut Bencher) {
         Test::bench_find(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 1000, bh);
     }
 
     #[bench]
-    fn bench_find_shared_50000(bh: &mut BenchHarness) {
-        Test::bench_find(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 50000, bh);
+    fn bench_find_shared_100000(bh: &mut Bencher) {
+        Test::bench_find(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 100000, bh);
     }
 
     #[bench]
-    fn bench_remove_shared_10(bh: &mut BenchHarness) {
+    fn bench_remove_shared_10(bh: &mut Bencher) {
         Test::bench_remove(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 10, bh);
     }
 
     #[bench]
-    fn bench_remove_shared_100(bh: &mut BenchHarness) {
-        Test::bench_remove(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 100, bh);
-    }
-
-    #[bench]
-    fn bench_remove_shared_1000(bh: &mut BenchHarness) {
+    fn bench_remove_shared_1000(bh: &mut Bencher) {
         Test::bench_remove(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 1000, bh);
     }
 
     #[bench]
-    fn bench_remove_shared_50000(bh: &mut BenchHarness) {
-        Test::bench_remove(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 50000, bh);
+    fn bench_remove_shared_100000(bh: &mut Bencher) {
+        Test::bench_remove(RedBlackTree::<u64, u64, ShareStore<u64, u64>>::new(), 100000, bh);
     }
 }

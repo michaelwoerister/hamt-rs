@@ -24,14 +24,12 @@
 //! The idea to use a special *collision node* to deal with hash collisions is taken from Clojure's
 //! implementation.
 
-use std::cast;
 use std::hash::{Hasher, Hash};
 use std::intrinsics;
 use std::mem;
 use std::ptr;
-use std::vec;
 use std::sync::atomics::{AtomicUint, Acquire, Release};
-use std::rt::global_heap::{exchange_malloc, exchange_free};
+use std::rt::heap;
 
 use sync::Arc;
 use PersistentMap;
@@ -54,18 +52,18 @@ enum NodeRefBorrowResult<'a, K, V, IS, H> {
     SharedNode(&'a UnsafeNode<K, V, IS, H>),
 }
 
-impl<K: Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>> NodeRef<K, V, IS, H> {
+impl<K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>> NodeRef<K, V, IS, H> {
 
     fn borrow<'a>(&'a self) -> &'a UnsafeNode<K, V, IS, H> {
         unsafe {
-            cast::transmute(self.ptr)
+            mem::transmute(self.ptr)
         }
     }
 
     fn borrow_mut<'a>(&'a mut self) -> &'a mut UnsafeNode<K, V, IS, H> {
         unsafe {
             assert!((*self.ptr).ref_count.load(Acquire) == 1);
-            cast::transmute(self.ptr)
+            mem::transmute(self.ptr)
         }
     }
 
@@ -74,9 +72,9 @@ impl<K: Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>> No
     fn try_borrow_owned<'a>(&'a mut self) -> NodeRefBorrowResult<'a, K, V, IS, H> {
         unsafe {
             if (*self.ptr).ref_count.load(Acquire) == 1 {
-                OwnedNode(cast::transmute(self.ptr))
+                OwnedNode(mem::transmute(self.ptr))
             } else {
-                SharedNode(cast::transmute(self.ptr))
+                SharedNode(mem::transmute(self.ptr))
             }
         }
     }
@@ -86,7 +84,7 @@ impl<K: Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>> No
 impl<K, V, IS, H> Drop for NodeRef<K, V, IS, H> {
     fn drop(&mut self) {
         unsafe {
-            let node: &mut UnsafeNode<K, V, IS, H> = cast::transmute(self.ptr);
+            let node: &mut UnsafeNode<K, V, IS, H> = mem::transmute(self.ptr);
             let old_count = node.ref_count.fetch_sub(1, Acquire);
             assert!(old_count >= 1);
             if old_count == 1 {
@@ -99,7 +97,7 @@ impl<K, V, IS, H> Drop for NodeRef<K, V, IS, H> {
 impl<K, V, IS, H> Clone for NodeRef<K, V, IS, H> {
     fn clone(&self) -> NodeRef<K, V, IS, H> {
         unsafe {
-            let node: &mut UnsafeNode<K, V, IS, H> = cast::transmute(self.ptr);
+            let node: &mut UnsafeNode<K, V, IS, H> = mem::transmute(self.ptr);
             let old_count = node.ref_count.fetch_add(1, Release);
             assert!(old_count >= 1);
         }
@@ -125,7 +123,7 @@ static MIN_CAPACITY: uint = 4;
 
 // This struct should have the correct alignment for node entries.
 struct AlignmentStruct<K, V, IS, H> {
-    a: Arc<~[IS]>,
+    a: Arc<Vec<IS>>,
     b: IS,
     c: NodeRef<K, V, IS, H>
 }
@@ -159,12 +157,12 @@ struct UnsafeNode<K, V, IS, H> {
 // A temporary reference to a node entries content. This is a safe wrapper around the unsafe,
 // low-level bitmask-based memory representation of node entries.
 enum NodeEntryRef<'a, K, V, IS, H> {
-    CollisionEntryRef(&'a Arc<~[IS]>),
+    CollisionEntryRef(&'a Arc<Vec<IS>>),
     ItemEntryRef(&'a IS),
     SubTreeEntryRef(&'a NodeRef<K, V, IS, H>)
 }
 
-impl<'a, K: Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>, H> NodeEntryRef<'a, K, V, IS, H> {
+impl<'a, K: Send+Share, V: Send+Share, IS: ItemStore<K, V>, H> NodeEntryRef<'a, K, V, IS, H> {
     // Clones the contents of a NodeEntryRef into a NodeEntryOwned value to be used elsewhere.
     fn clone_out(&self) -> NodeEntryOwned<K, V, IS, H> {
         match *self {
@@ -177,14 +175,14 @@ impl<'a, K: Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>, H> NodeEntryRef<'a
 
 // The same as NodeEntryRef but allowing for mutable access to the referenced node entry.
 enum NodeEntryMutRef<'a, K, V, IS, H> {
-    CollisionEntryMutRef(&'a mut Arc<~[IS]>),
+    CollisionEntryMutRef(&'a mut Arc<Vec<IS>>),
     ItemEntryMutRef(&'a mut IS),
     SubTreeEntryMutRef(&'a mut NodeRef<K, V, IS, H>)
 }
 
 // Similar to NodeEntryRef, but actually owning the entry data, so it can be moved around.
 enum NodeEntryOwned<K, V, IS, H> {
-    CollisionEntryOwned(Arc<~[IS]>),
+    CollisionEntryOwned(Arc<Vec<IS>>),
     ItemEntryOwned(IS),
     SubTreeEntryOwned(NodeRef<K, V, IS, H>)
 }
@@ -229,7 +227,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
     fn get_entry_ptr(&self, index: uint) -> *u8 {
         assert!(index < self.entry_count());
         unsafe {
-            let base: *u8 = cast::transmute(&self.__entries);
+            let base: *u8 = mem::transmute(&self.__entries);
             base.offset((index * UnsafeNode::<K, V, IS, H>::node_entry_size()) as int)
         }
     }
@@ -240,9 +238,9 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
 
         unsafe {
             match self.get_entry_type_code(index) {
-                KVP_ENTRY => ItemEntryRef(cast::transmute(entry_ptr)),
-                SUBTREE_ENTRY => SubTreeEntryRef(cast::transmute(entry_ptr)),
-                COLLISION_ENTRY => CollisionEntryRef(cast::transmute(entry_ptr)),
+                KVP_ENTRY => ItemEntryRef(mem::transmute(entry_ptr)),
+                SUBTREE_ENTRY => SubTreeEntryRef(mem::transmute(entry_ptr)),
+                COLLISION_ENTRY => CollisionEntryRef(mem::transmute(entry_ptr)),
                 _ => fail!("Invalid entry type code")
             }
         }
@@ -254,9 +252,9 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
 
         unsafe {
             match self.get_entry_type_code(index) {
-                KVP_ENTRY => ItemEntryMutRef(cast::transmute(entry_ptr)),
-                SUBTREE_ENTRY => SubTreeEntryMutRef(cast::transmute(entry_ptr)),
-                COLLISION_ENTRY => CollisionEntryMutRef(cast::transmute(entry_ptr)),
+                KVP_ENTRY => ItemEntryMutRef(mem::transmute(entry_ptr)),
+                SUBTREE_ENTRY => SubTreeEntryMutRef(mem::transmute(entry_ptr)),
+                COLLISION_ENTRY => CollisionEntryMutRef(mem::transmute(entry_ptr)),
                 _ => fail!("Invalid entry type code")
             }
         }
@@ -270,15 +268,15 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
         unsafe {
             match entry {
                 ItemEntryOwned(kvp) => {
-                    intrinsics::move_val_init(cast::transmute(entry_ptr), kvp);
+                    intrinsics::move_val_init(mem::transmute(entry_ptr), kvp);
                     self.set_entry_type_code(index, KVP_ENTRY);
                 }
                 SubTreeEntryOwned(node_ref) => {
-                    intrinsics::move_val_init(cast::transmute(entry_ptr), node_ref);
+                    intrinsics::move_val_init(mem::transmute(entry_ptr), node_ref);
                     self.set_entry_type_code(index, SUBTREE_ENTRY);
                 }
                 CollisionEntryOwned(arc) => {
-                    intrinsics::move_val_init(cast::transmute(entry_ptr), arc);
+                    intrinsics::move_val_init(mem::transmute(entry_ptr), arc);
                     self.set_entry_type_code(index, COLLISION_ENTRY);
                 }
             }
@@ -319,11 +317,6 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
             mem::size_of_val(&node.__entries)
         }
 
-        fn align_to(size: uint, align: uint) -> uint {
-            assert!(align != 0 && bit_count(align as u32) == 1);
-            (size + align - 1) & !(align - 1)
-        }
-
         let align = mem::pref_align_of::<AlignmentStruct<K, V, IS, H>>();
         let entry_count = bit_count(mask);
         assert!(entry_count <= capacity);
@@ -332,7 +325,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
         let node_size = header_size + capacity * UnsafeNode::<K, V, IS, H>::node_entry_size();
 
         unsafe {
-            let node_ptr: *mut UnsafeNode<K, V, IS, H> = cast::transmute(exchange_malloc(node_size));
+            let node_ptr: *mut UnsafeNode<K, V, IS, H> = mem::transmute(heap::allocate(node_size, align));
             intrinsics::move_val_init(&mut (*node_ptr).ref_count, AtomicUint::new(1));
             intrinsics::move_val_init(&mut (*node_ptr).entry_types, 0);
             intrinsics::move_val_init(&mut (*node_ptr).mask, mask);
@@ -349,9 +342,16 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
                 self.drop_entry(i)
             }
 
-            exchange_free(cast::transmute(self));
+            let align = mem::pref_align_of::<AlignmentStruct<K, V, IS, H>>();
+            let header_size = align_to(mem::size_of::<UnsafeNode<K, V, IS, H>>(), align);
+            let node_size = header_size + (self.capacity as uint) * UnsafeNode::<K, V, IS, H>::node_entry_size();
+
+            heap::deallocate(mem::transmute(self), node_size, align);
         }
     }
+    // CollisionEntryMutRef(&'a mut Arc<~[IS]>),
+    // ItemEntryMutRef(&'a mut IS),
+    // SubTreeEntryMutRef(&'a mut NodeRef<K, V, IS, H>)
 
     // Drops a single entry. Does not modify the entry_types or mask field of the node, just calls
     // the destructor of the entry at the given index.
@@ -359,20 +359,20 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
         // destroy the contained object, trick from Rc
         match self.get_entry_mut(index) {
             ItemEntryMutRef(item_ref) => {
-                let _ = ptr::read(cast::transmute_immut_unsafe(item_ref));
+                let _ = ptr::read(item_ref as *mut IS as *IS);
             }
             CollisionEntryMutRef(item_ref) => {
-                let _ = ptr::read(cast::transmute_immut_unsafe(item_ref));
+                let _ = ptr::read(item_ref as *mut Arc<Vec<IS>> as *Arc<Vec<IS>>);
             }
             SubTreeEntryMutRef(item_ref) => {
-                let _ = ptr::read(cast::transmute_immut_unsafe(item_ref));
+                let _ = ptr::read(item_ref as *mut NodeRef<K, V, IS, H> as *NodeRef<K, V, IS, H>);
             }
         }
     }
 }
 
 // impl UnsafeNode (continued)
-impl<K: Eq+Send+Freeze+Hash<S>, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>>
+impl<K: Eq+Send+Share+Hash<S>, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>>
 UnsafeNode<K, V, IS, H> {
     // Insert a new key-value pair into the tree. The existing tree is not modified and a new tree
     // is created. This new tree will share most nodes with the existing one.
@@ -437,20 +437,20 @@ UnsafeNode<K, V, IS, H> {
                     *insertion_count = 1;
                     // If we have already exhausted all bits from the hash value, put everything in
                     // collision node
-                    let items = ~[new_kvp, existing_kvp_ref.clone()];
+                    let items = vec!(new_kvp, existing_kvp_ref.clone());
                     self.copy_with_new_entry(local_key, CollisionEntryOwned(Arc::new(items)))
                 }
             }
-            CollisionEntryRef(items_ref) => {
+            CollisionEntryRef(items_arc) => {
                 assert!(level == LAST_LEVEL);
-                let items = items_ref.get();
+                let items = items_arc.deref();
                 let position = items.iter().position(|kvp2| *kvp2.key() == *new_kvp.key());
 
                 let new_items = match position {
                     None => {
                         *insertion_count = 1;
 
-                        let mut new_items = vec::with_capacity(items.len() + 1);
+                        let mut new_items = Vec::with_capacity(items.len() + 1);
                         new_items.push(new_kvp);
                         new_items.push_all(items.as_slice());
                         new_items
@@ -459,7 +459,7 @@ UnsafeNode<K, V, IS, H> {
                         *insertion_count = 0;
 
                         let item_count = items.len();
-                        let mut new_items = vec::with_capacity(item_count);
+                        let mut new_items = Vec::with_capacity(item_count);
 
                         if position > 0 {
                             new_items.push_all(items.slice_to(position));
@@ -558,21 +558,20 @@ UnsafeNode<K, V, IS, H> {
                     *insertion_count = 1;
                     // If we have already exhausted all bits from the hash value, put everything in
                     // collision node
-                    let items = ~[new_kvp, existing_kvp_ref.clone()];
+                    let items = vec!(new_kvp, existing_kvp_ref.clone());
                     let collision_entry = CollisionEntryOwned(Arc::new(items));
                     Some(collision_entry)
                 }
             }
-            CollisionEntryMutRef(items_ref) => {
+            CollisionEntryMutRef(items) => {
                 assert!(level == LAST_LEVEL);
-                let items = items_ref.get();
                 let position = items.iter().position(|kvp2| *kvp2.key() == *new_kvp.key());
 
                 let new_items = match position {
                     None => {
                         *insertion_count = 1;
 
-                        let mut new_items = vec::with_capacity(items.len() + 1);
+                        let mut new_items = Vec::with_capacity(items.len() + 1);
                         new_items.push(new_kvp);
                         new_items.push_all(items.as_slice());
                         new_items
@@ -581,7 +580,7 @@ UnsafeNode<K, V, IS, H> {
                         *insertion_count = 0;
 
                         let item_count = items.len();
-                        let mut new_items = vec::with_capacity(item_count);
+                        let mut new_items = Vec::with_capacity(item_count);
 
                         if position > 0 {
                             new_items.push_all(items.slice_to(position));
@@ -664,9 +663,9 @@ UnsafeNode<K, V, IS, H> {
                     NoChange
                 }
             }
-            CollisionEntryRef(items_ref) => {
+            CollisionEntryRef(items_arc) => {
                 assert!(level == LAST_LEVEL);
-                let items = items_ref.get();
+                let items = items_arc.deref();
                 let position = items.iter().position(|kvp| *kvp.key() == *key);
 
                 match position {
@@ -681,7 +680,7 @@ UnsafeNode<K, V, IS, H> {
                         // The new entry can either still be a collision node, or it can be a simple
                         // single-item node if the hash collision has been resolved by the removal
                         let new_entry = if item_count > 1 {
-                            let mut new_items = vec::with_capacity(item_count);
+                            let mut new_items = Vec::with_capacity(item_count);
 
                             if position > 0 {
                                 new_items.push_all(items.slice_to(position));
@@ -696,7 +695,7 @@ UnsafeNode<K, V, IS, H> {
                             assert!(items.len() == 2);
                             assert!(position == 0 || position == 1);
                             let index_of_remaining_item = 1 - position;
-                            let kvp = items[index_of_remaining_item].clone();
+                            let kvp = items.get(index_of_remaining_item).clone();
 
                             ItemEntryOwned(kvp)
                         };
@@ -766,9 +765,8 @@ UnsafeNode<K, V, IS, H> {
                     NoAction
                 }
             }
-            CollisionEntryMutRef(items_ref) => {
+            CollisionEntryMutRef(items) => {
                 assert!(level == LAST_LEVEL);
-                let items = items_ref.get();
                 let position = items.iter().position(|kvp| *kvp.key() == *key);
 
                 match position {
@@ -783,7 +781,7 @@ UnsafeNode<K, V, IS, H> {
                         // The new entry can either still be a collision node, or it can be a simple
                         // single-item node if the hash collision has been resolved by the removal
                         let new_entry = if item_count > 1 {
-                            let mut new_items = vec::with_capacity(item_count);
+                            let mut new_items = Vec::with_capacity(item_count);
 
                             if position > 0 {
                                 new_items.push_all(items.slice_to(position));
@@ -798,7 +796,7 @@ UnsafeNode<K, V, IS, H> {
                             assert!(items.len() == 2);
                             assert!(position == 0 || position == 1);
                             let index_of_remaining_item = 1 - position;
-                            let kvp = items[index_of_remaining_item].clone();
+                            let kvp = items.get(index_of_remaining_item).clone();
 
                             ItemEntryOwned(kvp)
                         };
@@ -968,7 +966,7 @@ UnsafeNode<K, V, IS, H> {
             unsafe {
                 if index < self.entry_count() {
                     let source: *u8 = self.get_entry_ptr(index);
-                    let dest: *mut u8 = cast::transmute_mut_unsafe(
+                    let dest: *mut u8 = mem::transmute(
                         source.offset(UnsafeNode::<K, V, IS, H>::node_entry_size() as int));
                     let count = (self.entry_count() - index) *
                         UnsafeNode::<K, V, IS, H>::node_entry_size();
@@ -1042,7 +1040,7 @@ UnsafeNode<K, V, IS, H> {
 
             if index < self.entry_count() - 1 {
                 let source: *u8 = self.get_entry_ptr(index + 1);
-                let dest: *mut u8 = cast::transmute_mut_unsafe(
+                let dest: *mut u8 = mem::transmute(
                     source.offset(-(UnsafeNode::<K, V, IS, H>::node_entry_size() as int))
                     );
                 let count = (self.entry_count() - (index + 1)) *
@@ -1091,7 +1089,8 @@ UnsafeNode<K, V, IS, H> {
             let mut new_node_ref = UnsafeNode::alloc(mask, MIN_CAPACITY);
             {
                 let new_node = new_node_ref.borrow_mut();
-                new_node.init_entry(0, CollisionEntryOwned(Arc::new(~[new_kvp, existing_kvp.clone()])));
+                let items = vec!(new_kvp, existing_kvp.clone());
+                new_node.init_entry(0, CollisionEntryOwned(Arc::new(items)));
             }
             new_node_ref
         } else {
@@ -1124,7 +1123,7 @@ pub struct HamtMap<K, V, IS, H> {
 }
 
 // impl HamtMap
-impl<K: Eq+Send+Freeze+Hash<S>, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
+impl<K: Eq+Send+Share+Hash<S>, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
 HamtMap<K, V, IS, H> {
 
     pub fn new(hasher: H) -> HamtMap<K, V, IS, H> {
@@ -1162,9 +1161,9 @@ HamtMap<K, V, IS, H> {
                 } else {
                     None
                 },
-                CollisionEntryRef(items_ref) => {
+                CollisionEntryRef(items) => {
                     assert!(level == LAST_LEVEL);
-                    let found = items_ref.get().iter().find(|&kvp| *key == *kvp.key());
+                    let found = items.iter().find(|&kvp| *key == *kvp.key());
                     return match found {
                         Some(kvp) => Some(kvp.val()),
                         None => None,
@@ -1262,7 +1261,7 @@ HamtMap<K, V, IS, H> {
 }
 
 // Clone for HamtMap
-impl<K: Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
+impl<K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
 Clone for HamtMap<K, V, IS, H> {
 
     fn clone(&self) -> HamtMap<K, V, IS, H> {
@@ -1275,7 +1274,7 @@ Clone for HamtMap<K, V, IS, H> {
 }
 
 // Container for HamtMap
-impl<K: Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>>
+impl<K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>>
 Container for HamtMap<K, V, IS, H> {
 
     fn len(&self) -> uint {
@@ -1284,7 +1283,7 @@ Container for HamtMap<K, V, IS, H> {
 }
 
 // Map for HamtMap
-impl<K: Eq+Send+Freeze+Hash<S>, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
+impl<K: Eq+Send+Share+Hash<S>, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
 Map<K, V> for HamtMap<K, V, IS, H> {
 
     fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
@@ -1293,11 +1292,11 @@ Map<K, V> for HamtMap<K, V, IS, H> {
 }
 
 // PersistentMap for HamtMap<CopyStore>
-impl<K: Eq+Send+Freeze+Clone+Hash<S>, V: Send+Freeze+Clone, S, H: Hasher<S>+Clone>
+impl<K: Eq+Send+Share+Clone+Hash<S>, V: Send+Share+Clone, S, H: Hasher<S>+Clone>
 PersistentMap<K, V> for HamtMap<K, V, CopyStore<K, V>, H> {
 
     fn insert(self, key: K, value: V) -> (HamtMap<K, V, CopyStore<K, V>, H>, bool) {
-        self.insert_internal(CopyStore { key: key, val: value })
+        self.insert_internal(CopyStore::new(key, value))
     }
 
     fn remove(self, key: &K) -> (HamtMap<K, V, CopyStore<K, V>, H>, bool) {
@@ -1306,7 +1305,7 @@ PersistentMap<K, V> for HamtMap<K, V, CopyStore<K, V>, H> {
 }
 
 // PersistentMap for HamtMap<ShareStore>
-impl<K: Eq+Send+Freeze+Hash<S>, V: Send+Freeze, S, H: Hasher<S>+Clone>
+impl<K: Eq+Send+Share+Hash<S>, V: Send+Share, S, H: Hasher<S>+Clone>
 PersistentMap<K, V> for HamtMap<K, V, ShareStore<K, V>, H> {
 
     fn insert(self, key: K, value: V) -> (HamtMap<K, V, ShareStore<K, V>, H>, bool) {
@@ -1326,17 +1325,17 @@ PersistentMap<K, V> for HamtMap<K, V, ShareStore<K, V>, H> {
 
 enum IteratorNodeRef<'a, K, V, IS, H> {
     IterNodeRef(&'a UnsafeNode<K, V, IS, H>),
-    IterCollisionEntryRef(&'a ~[IS]),
+    IterCollisionEntryRef(&'a Vec<IS>),
     IterEmpty
 }
 
 pub struct HamtMapIterator<'a, K, V, IS, H> {
-    priv node_stack: [(IteratorNodeRef<'a, K, V, IS, H>, int), .. LAST_LEVEL + 2],
-    priv stack_size: uint,
-    priv len: uint,
+    node_stack: [(IteratorNodeRef<'a, K, V, IS, H>, int), .. LAST_LEVEL + 2],
+    stack_size: uint,
+    len: uint,
 }
 
-impl<'a, K: Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>>
+impl<'a, K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>>
 HamtMapIterator<'a, K, V, IS, H> {
 
     fn new<'a>(map: &'a HamtMap<K, V, IS, H>) -> HamtMapIterator<'a, K, V, IS, H> {
@@ -1351,7 +1350,7 @@ HamtMapIterator<'a, K, V, IS, H> {
     }
 }
 
-impl<'a, K: Eq+Send+Freeze, V: Send+Freeze, IS: ItemStore<K, V>, S, H: Hasher<S>>
+impl<'a, K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>>
 Iterator<(&'a K, &'a V)> for HamtMapIterator<'a, K, V, IS, H> {
 
     fn next(&mut self) -> Option<(&'a K, &'a V)> {
@@ -1376,11 +1375,11 @@ Iterator<(&'a K, &'a V)> for HamtMapIterator<'a, K, V, IS, H> {
                     ItemEntryRef(item_ref) => {
                         return Some((item_ref.key(), item_ref.val()));
                     }
-                    CollisionEntryRef(items_ref_arc) => {
-                        let items_ref = items_ref_arc.get();
-                        self.node_stack[self.stack_size] = (IterCollisionEntryRef(items_ref), 0);
+                    CollisionEntryRef(items_arc) => {
+                        let items = items_arc.deref();
+                        self.node_stack[self.stack_size] = (IterCollisionEntryRef(items), 0);
                         self.stack_size += 1;
-                        let item = &items_ref[0];
+                        let item = &items.get(0);
                         return Some((item.key(), item.val()));
                     },
                     SubTreeEntryRef(subtree_ref) => {
@@ -1396,7 +1395,7 @@ Iterator<(&'a K, &'a V)> for HamtMapIterator<'a, K, V, IS, H> {
                     return self.next();
                 }
 
-                let item = &items_ref[next_index];
+                let item = &items_ref.get(next_index);
                 return Some((item.key(), item.val()));
             }
             IterEmpty => unreachable!()
@@ -1418,7 +1417,7 @@ struct HamtSet<V, H> {
 }
 
 // Set for HamtSet
-impl<V: Send+Freeze+Eq+Hash<S>, S, H: Hasher<S>+Clone>
+impl<V: Send+Share+Eq+Hash<S>, S, H: Hasher<S>+Clone>
 Set<V> for HamtSet<V, H> {
     fn contains(&self, value: &V) -> bool {
         self.data.contains_key(value)
@@ -1454,7 +1453,7 @@ Set<V> for HamtSet<V, H> {
 }
 
 // Clone for HamtSet
-impl<V: Eq+Send+Freeze, S, H: Hasher<S>+Clone>
+impl<V: Eq+Send+Share, S, H: Hasher<S>+Clone>
 Clone for HamtSet<V, H> {
 
     fn clone(&self) -> HamtSet<V, H> {
@@ -1465,7 +1464,7 @@ Clone for HamtSet<V, H> {
 }
 
 // Container for HamtSet
-impl<V: Eq+Send+Freeze, S, H: Hasher<S>>
+impl<V: Eq+Send+Share, S, H: Hasher<S>>
 Container for HamtSet<V, H> {
 
     fn len(&self) -> uint {
@@ -1492,12 +1491,17 @@ fn bit_count(x: u32) -> uint {
     x.count_ones() as uint
 }
 
+fn align_to(size: uint, align: uint) -> uint {
+    assert!(align != 0 && bit_count(align as u32) == 1);
+    (size + align - 1) & !(align - 1)
+}
+
 #[cfg(test)]
 mod tests {
     use super::get_index;
     use super::HamtMap;
     use testing::Test;
-    use test::BenchHarness;
+    use test::Bencher;
     use collections::hashmap::HashMap;
     use PersistentMap;
     use std::hash::sip::{SipHasher, SipState};
@@ -1579,68 +1583,68 @@ mod tests {
 //=-------------------------------------------------------------------------------------------------
 
     #[bench]
-    fn bench_insert_copy_10(bh: &mut BenchHarness) {
+    fn bench_insert_copy_10(bh: &mut Bencher) {
         Test::bench_insert(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
-    fn bench_insert_copy_1000(bh: &mut BenchHarness) {
+    fn bench_insert_copy_1000(bh: &mut Bencher) {
         Test::bench_insert(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
-    fn bench_insert_copy_100000(bh: &mut BenchHarness) {
+    fn bench_insert_copy_100000(bh: &mut Bencher) {
         Test::bench_insert(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
     #[bench]
-    fn bench_find_copy_10(bh: &mut BenchHarness) {
+    fn bench_find_copy_10(bh: &mut Bencher) {
         Test::bench_find(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
-    fn bench_find_copy_1000(bh: &mut BenchHarness) {
+    fn bench_find_copy_1000(bh: &mut Bencher) {
         Test::bench_find(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
-    fn bench_find_copy_100000(bh: &mut BenchHarness) {
+    fn bench_find_copy_100000(bh: &mut Bencher) {
         Test::bench_find(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
     #[bench]
-    fn bench_remove_copy_10(bh: &mut BenchHarness) {
+    fn bench_remove_copy_10(bh: &mut Bencher) {
         Test::bench_remove(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
-    fn bench_remove_copy_1000(bh: &mut BenchHarness) {
+    fn bench_remove_copy_1000(bh: &mut Bencher) {
         Test::bench_remove(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
-    fn bench_remove_copy_100000(bh: &mut BenchHarness) {
+    fn bench_remove_copy_100000(bh: &mut Bencher) {
         Test::bench_remove(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
     #[bench]
-    fn bench_iterate_copy_10(bh: &mut BenchHarness) {
+    fn bench_iterate_copy_10(bh: &mut Bencher) {
         bench_iterator_copy(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
-    fn bench_iterate_copy_1000(bh: &mut BenchHarness) {
+    fn bench_iterate_copy_1000(bh: &mut Bencher) {
         bench_iterator_copy(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
-    fn bench_iterate_copy_100000(bh: &mut BenchHarness) {
+    fn bench_iterate_copy_100000(bh: &mut Bencher) {
         bench_iterator_copy(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
     fn bench_iterator_copy(mut map: HamtMap<u64, u64, CopyStore, SipHasher>,
                            size: uint,
-                           bh: &mut BenchHarness) {
+                           bh: &mut Bencher) {
         for i in range(0u64, size as u64) {
             map = map.plus(i, i);
         }
@@ -1712,68 +1716,68 @@ mod tests {
 //=-------------------------------------------------------------------------------------------------
 
     #[bench]
-    fn bench_insert_share_10(bh: &mut BenchHarness) {
+    fn bench_insert_share_10(bh: &mut Bencher) {
         Test::bench_insert(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
-    fn bench_insert_share_1000(bh: &mut BenchHarness) {
+    fn bench_insert_share_1000(bh: &mut Bencher) {
         Test::bench_insert(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
-    fn bench_insert_share_100000(bh: &mut BenchHarness) {
+    fn bench_insert_share_100000(bh: &mut Bencher) {
         Test::bench_insert(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
     #[bench]
-    fn bench_find_share_10(bh: &mut BenchHarness) {
+    fn bench_find_share_10(bh: &mut Bencher) {
         Test::bench_find(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
-    fn bench_find_share_1000(bh: &mut BenchHarness) {
+    fn bench_find_share_1000(bh: &mut Bencher) {
         Test::bench_find(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
-    fn bench_find_share_100000(bh: &mut BenchHarness) {
+    fn bench_find_share_100000(bh: &mut Bencher) {
         Test::bench_find(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
     #[bench]
-    fn bench_remove_share_10(bh: &mut BenchHarness) {
+    fn bench_remove_share_10(bh: &mut Bencher) {
         Test::bench_remove(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
-    fn bench_remove_share_1000(bh: &mut BenchHarness) {
+    fn bench_remove_share_1000(bh: &mut Bencher) {
         Test::bench_remove(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
-    fn bench_remove_share_100000(bh: &mut BenchHarness) {
+    fn bench_remove_share_100000(bh: &mut Bencher) {
         Test::bench_remove(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
     #[bench]
-    fn bench_iterate_share_10(bh: &mut BenchHarness) {
+    fn bench_iterate_share_10(bh: &mut Bencher) {
         bench_iterator_share(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
-    fn bench_iterate_share_1000(bh: &mut BenchHarness) {
+    fn bench_iterate_share_1000(bh: &mut Bencher) {
         bench_iterator_share(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
-    fn bench_iterate_share_100000(bh: &mut BenchHarness) {
+    fn bench_iterate_share_100000(bh: &mut Bencher) {
         bench_iterator_share(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
     fn bench_iterator_share(mut map: HamtMap<u64, u64, ShareStore, SipHasher>,
                             size: uint,
-                            bh: &mut BenchHarness) {
+                            bh: &mut Bencher) {
         for i in range(0u64, size as u64) {
             map = map.plus(i, i);
         }
