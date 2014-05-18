@@ -29,7 +29,7 @@ use std::intrinsics;
 use std::mem;
 use std::ptr;
 use std::sync::atomics::{AtomicUint, Acquire, Release};
-use std::rt::heap;
+use alloc::heap;
 
 use sync::Arc;
 use PersistentMap;

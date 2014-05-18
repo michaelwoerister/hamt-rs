@@ -26,7 +26,6 @@
 
 #![feature(default_type_params)]
 #![feature(macro_rules)]
-#![allow(deprecated_owned_vector)]
 
 #[cfg(test)]
 extern crate test;
@@ -36,6 +35,7 @@ extern crate collections;
 extern crate rand;
 
 extern crate sync;
+extern crate alloc;
 
 use std::hash::sip::SipHasher;
 
