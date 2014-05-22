@@ -18,8 +18,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-use sync::Arc;
 use std::hash::Hash;
+use sync::Arc;
+
 use PersistentMap;
 use item_store::{ItemStore, CopyStore, ShareStore};
 

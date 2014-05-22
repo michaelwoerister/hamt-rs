@@ -35,7 +35,6 @@ extern crate collections;
 extern crate rand;
 
 extern crate sync;
-extern crate alloc;
 
 use std::hash::sip::SipHasher;
 

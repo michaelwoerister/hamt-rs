@@ -29,9 +29,10 @@ use std::intrinsics;
 use std::mem;
 use std::ptr;
 use std::sync::atomics::{AtomicUint, Acquire, Release};
-use alloc::heap;
+use std::rt::heap;
 
 use sync::Arc;
+
 use PersistentMap;
 use item_store::{ItemStore, CopyStore, ShareStore};
 
@@ -317,7 +318,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
             mem::size_of_val(&node.__entries)
         }
 
-        let align = mem::pref_align_of::<AlignmentStruct<K, V, IS, H>>();
+        let align = mem::align_of::<AlignmentStruct<K, V, IS, H>>();
         let entry_count = bit_count(mask);
         assert!(entry_count <= capacity);
 
@@ -342,7 +343,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
                 self.drop_entry(i)
             }
 
-            let align = mem::pref_align_of::<AlignmentStruct<K, V, IS, H>>();
+            let align = mem::align_of::<AlignmentStruct<K, V, IS, H>>();
             let header_size = align_to(mem::size_of::<UnsafeNode<K, V, IS, H>>(), align);
             let node_size = header_size + (self.capacity as uint) * UnsafeNode::<K, V, IS, H>::node_entry_size();
 
