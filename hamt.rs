@@ -124,9 +124,9 @@ static MIN_CAPACITY: uint = 4;
 
 // This struct should have the correct alignment for node entries.
 struct AlignmentStruct<K, V, IS, H> {
-    a: Arc<Vec<IS>>,
-    b: IS,
-    c: NodeRef<K, V, IS, H>
+    _a: Arc<Vec<IS>>,
+    _b: IS,
+    _c: NodeRef<K, V, IS, H>
 }
 
 // Bit signature of node entry types. Every node contains a single u64 designating the kinds of all
@@ -225,10 +225,10 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
     }
 
     // Get a raw pointer the an entry.
-    fn get_entry_ptr(&self, index: uint) -> *u8 {
+    fn get_entry_ptr(&self, index: uint) -> *const u8 {
         assert!(index < self.entry_count());
         unsafe {
-            let base: *u8 = mem::transmute(&self.__entries);
+            let base: *const u8 = mem::transmute(&self.__entries);
             base.offset((index * UnsafeNode::<K, V, IS, H>::node_entry_size()) as int)
         }
     }
@@ -294,7 +294,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
         ::std::cmp::max(
             mem::size_of::<IS>(),
             ::std::cmp::max(
-                mem::size_of::<Arc<~[IS]>>(),
+                mem::size_of::<Arc<Vec<IS>>>(),
                 mem::size_of::<NodeRef<K, V, IS, H>>(),
             )
         )
@@ -350,9 +350,6 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
             heap::deallocate(mem::transmute(self), node_size, align);
         }
     }
-    // CollisionEntryMutRef(&'a mut Arc<~[IS]>),
-    // ItemEntryMutRef(&'a mut IS),
-    // SubTreeEntryMutRef(&'a mut NodeRef<K, V, IS, H>)
 
     // Drops a single entry. Does not modify the entry_types or mask field of the node, just calls
     // the destructor of the entry at the given index.
@@ -360,13 +357,13 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
         // destroy the contained object, trick from Rc
         match self.get_entry_mut(index) {
             ItemEntryMutRef(item_ref) => {
-                let _ = ptr::read(item_ref as *mut IS as *IS);
+                let _ = ptr::read(item_ref as *mut IS as *const IS);
             }
             CollisionEntryMutRef(item_ref) => {
-                let _ = ptr::read(item_ref as *mut Arc<Vec<IS>> as *Arc<Vec<IS>>);
+                let _ = ptr::read(item_ref as *mut Arc<Vec<IS>> as *const Arc<Vec<IS>>);
             }
             SubTreeEntryMutRef(item_ref) => {
-                let _ = ptr::read(item_ref as *mut NodeRef<K, V, IS, H> as *NodeRef<K, V, IS, H>);
+                let _ = ptr::read(item_ref as *mut NodeRef<K, V, IS, H> as *const NodeRef<K, V, IS, H>);
             }
         }
     }
@@ -742,13 +739,14 @@ UnsafeNode<K, V, IS, H> {
                     -> RemovalResult<K, V, IS, H> {
         assert!(level <= LAST_LEVEL);
         let local_key = (hash & LEVEL_BIT_MASK) as uint;
+        let mask = self.mask;
 
-        if (self.mask & (1 << local_key)) == 0 {
+        if (mask & (1 << local_key)) == 0 {
             *removal_count = 0;
             return NoChange;
         }
 
-        let index = get_index(self.mask, local_key);
+        let index = get_index(mask, local_key);
 
         enum Action<K, V, IS, H> {
             CollapseKillOrChange,
@@ -824,7 +822,7 @@ UnsafeNode<K, V, IS, H> {
                         ReplaceEntry(SubTreeEntryOwned(x))
                     }
                     CollapseSubTree(kvp) => {
-                        if bit_count(self.mask) == 1 {
+                        if bit_count(mask) == 1 {
                             return CollapseSubTree(kvp);
                         }
 
@@ -966,7 +964,7 @@ UnsafeNode<K, V, IS, H> {
             // make place for new entry:
             unsafe {
                 if index < self.entry_count() {
-                    let source: *u8 = self.get_entry_ptr(index);
+                    let source: *const u8 = self.get_entry_ptr(index);
                     let dest: *mut u8 = mem::transmute(
                         source.offset(UnsafeNode::<K, V, IS, H>::node_entry_size() as int));
                     let count = (self.entry_count() - index) *
@@ -1040,7 +1038,7 @@ UnsafeNode<K, V, IS, H> {
             self.drop_entry(index);
 
             if index < self.entry_count() - 1 {
-                let source: *u8 = self.get_entry_ptr(index + 1);
+                let source: *const u8 = self.get_entry_ptr(index + 1);
                 let dest: *mut u8 = mem::transmute(
                     source.offset(-(UnsafeNode::<K, V, IS, H>::node_entry_size() as int))
                     );
@@ -1067,8 +1065,8 @@ UnsafeNode<K, V, IS, H> {
                      -> NodeRef<K, V, IS, H> {
         assert!(level <= LAST_LEVEL);
 
-        let new_local_key = new_hash & LEVEL_BIT_MASK;
-        let existing_local_key = existing_hash & LEVEL_BIT_MASK;
+        let new_local_key = (new_hash & LEVEL_BIT_MASK) as uint;
+        let existing_local_key = (existing_hash & LEVEL_BIT_MASK) as uint;
 
         if new_local_key != existing_local_key {
             let mask = (1 << new_local_key) | (1 << existing_local_key);
@@ -1276,7 +1274,7 @@ Clone for HamtMap<K, V, IS, H> {
 
 // Container for HamtMap
 impl<K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>>
-Container for HamtMap<K, V, IS, H> {
+Collection for HamtMap<K, V, IS, H> {
 
     fn len(&self) -> uint {
         self.element_count
@@ -1466,7 +1464,7 @@ Clone for HamtSet<V, H> {
 
 // Container for HamtSet
 impl<V: Eq+Send+Share, S, H: Hasher<S>>
-Container for HamtSet<V, H> {
+Collection for HamtSet<V, H> {
 
     fn len(&self) -> uint {
         self.data.len()
@@ -1488,7 +1486,6 @@ fn get_index(mask: u32, index: uint) -> uint {
 }
 
 fn bit_count(x: u32) -> uint {
-    use std::num::Bitwise;
     x.count_ones() as uint
 }
 
@@ -1503,7 +1500,7 @@ mod tests {
     use super::HamtMap;
     use testing::Test;
     use test::Bencher;
-    use collections::hashmap::HashMap;
+    use std::collections::HashMap;
     use PersistentMap;
     use std::hash::sip::{SipHasher, SipState};
 

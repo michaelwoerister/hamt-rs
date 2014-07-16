@@ -1,6 +1,6 @@
 
-use rand::{Rng, StdRng};
-use collections::hashmap::HashMap;
+use std::rand::{Rng, StdRng};
+use std::collections::HashMap;
 
 use test::Bencher;
 
@@ -129,7 +129,7 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
 
         let mut map = empty;
 
-        for _ in range(0, 500000) {
+        for _ in range(0u, 500000) {
             let value: u64 = rng.gen();
 
             if rng.gen_weighted_bool(2) {

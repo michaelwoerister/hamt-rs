@@ -24,15 +24,12 @@
 //! information see [Wikipedia](https://en.wikipedia.org/wiki/Persistent_data_structure) for
 //! example.
 
+#![feature(unsafe_destructor)]
 #![feature(default_type_params)]
 #![feature(macro_rules)]
 
 #[cfg(test)]
 extern crate test;
-#[cfg(test)]
-extern crate collections;
-#[cfg(test)]
-extern crate rand;
 
 extern crate sync;
 

@@ -24,7 +24,7 @@ use sync::Arc;
 use PersistentMap;
 use item_store::{ItemStore, CopyStore, ShareStore};
 
-#[deriving(Clone, Eq)]
+#[deriving(Clone, Eq, PartialEq)]
 enum Color {
     NegativeBlack = 0,
     Red = 1,
@@ -604,7 +604,7 @@ impl<K: Hash+Eq+Send+Share+Ord+Clone, V: Send+Share+Clone, IS: ItemStore<K, V>> 
     }
 }
 
-impl<K: Hash+Eq+Send+Share+Ord+Clone, V: Send+Share+Clone, IS: ItemStore<K, V>> Container for RedBlackTree<K, V, IS> {
+impl<K: Hash+Eq+Send+Share+Ord+Clone, V: Send+Share+Clone, IS: ItemStore<K, V>> Collection for RedBlackTree<K, V, IS> {
     #[inline]
     fn len(&self) -> uint {
         self.len
