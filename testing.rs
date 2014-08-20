@@ -190,7 +190,7 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
 
         bh.iter(|| {
             for i in range(0u, BENCH_FIND_COUNT) {
-                let val = keys.get(i % count);
+                let val = keys[i % count];
                 // lets make about of half the lookups fail
                 let val = val + (i as u64 & 1);
 
@@ -211,7 +211,7 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
             let mut map1 = map.clone();
 
             for i in range(0u, BENCH_INSERT_COUNT) {
-                let val = *keys.get(count + i);
+                let val = keys[count + i];
                 map1 = map1.plus(val, val);
             }
         })
@@ -224,7 +224,7 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
             let mut map = map.clone();
 
             for x in ::std::iter::range_step(0, count as uint, 2) {
-                map = map.minus(keys.get(x));
+                map = map.minus(&keys[x]);
             }
         })
     }
@@ -240,10 +240,10 @@ fn bench_find_hashmap<T: MutableMap<u64, u64>>(empty: T, count: uint, bh: &mut B
 
     bh.iter(|| {
         for i in range(0u, BENCH_FIND_COUNT) {
-            let val = values.get(i % count);
+            let val = values[i % count];
 
             unsafe {
-                match map.find(val) {
+                match map.find(&val) {
                     Some(&x) => results[i] = Some(x),
                     None => results[i] = None,
                 }
@@ -264,7 +264,7 @@ fn bench_insert_hashmap<T: MutableMap<u64, u64> + Clone>(empty: T, count: uint, 
         let mut map1 = map.clone();
 
         for i in range(0u, BENCH_INSERT_COUNT) {
-            let val = *values.get(count + i);
+            let val = values[count + i];
             map1.insert(val, val);
         }
     })
@@ -297,7 +297,7 @@ fn bench_remove_hashmap<T: MutableMap<u64, u64>+Clone>(empty: T, count: uint, bh
         let mut map1 = map.clone();
 
         for x in ::std::iter::range_step(0, count, 2) {
-            map1.remove(values.get(x));
+            map1.remove(&values[x]);
         }
     })
 }

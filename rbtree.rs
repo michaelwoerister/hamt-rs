@@ -63,7 +63,7 @@ struct NodeRef<K, V, IS> {
     data: Option<Arc<NodeData<K, V, IS>>>
 }
 
-impl<K, V, IS> Clone for NodeRef<K, V, IS> {
+impl<K, V, IS: ItemStore<K, V>> Clone for NodeRef<K, V, IS> {
     fn clone(&self) -> NodeRef<K, V, IS> {
         NodeRef {
             col: self.col,
@@ -72,8 +72,8 @@ impl<K, V, IS> Clone for NodeRef<K, V, IS> {
     }
 }
 
-fn new_node<K: Ord+Clone+Send+Share,
-            V: Clone+Send+Share,
+fn new_node<K: Ord+Clone+Send+Sync,
+            V: Clone+Send+Sync,
             IS: ItemStore<K, V>>(
                 color: Color,
                 left: NodeRef<K, V, IS>,
@@ -96,8 +96,8 @@ fn new_node<K: Ord+Clone+Send+Share,
     return node;
 }
 
-fn new_leaf<K: Ord+Clone+Send+Share,
-            V: Clone+Send+Share,
+fn new_leaf<K: Ord+Clone+Send+Sync,
+            V: Clone+Send+Sync,
             IS: ItemStore<K, V>>(
                 color: Color)
              -> NodeRef<K, V, IS> {
@@ -107,7 +107,7 @@ fn new_leaf<K: Ord+Clone+Send+Share,
     return leaf;
 }
 
-impl<K: Ord+Clone+Send+Share, V: Clone+Send+Share, IS: ItemStore<K, V>> NodeRef<K, V, IS> {
+impl<K: Ord+Clone+Send+Sync, V: Clone+Send+Sync, IS: ItemStore<K, V>> NodeRef<K, V, IS> {
 
     fn is_leaf(&self) -> bool {
         self.data.is_none()
@@ -399,7 +399,7 @@ impl<K: Ord+Clone+Send+Share, V: Clone+Send+Share, IS: ItemStore<K, V>> NodeRef<
     // Deletes a key from this map
     fn delete(&self, search_key: &K, removal_count: &mut uint) -> NodeRef<K, V, IS> {
         // Finds the node to be removed
-        fn del<K: Ord+Clone+Send+Share, V: Clone+Send+Share, IS: ItemStore<K, V>>(
+        fn del<K: Ord+Clone+Send+Sync, V: Clone+Send+Sync, IS: ItemStore<K, V>>(
             node: &NodeRef<K, V, IS>,
             search_key: &K,
             removal_count: &mut uint)
@@ -429,7 +429,7 @@ impl<K: Ord+Clone+Send+Share, V: Clone+Send+Share, IS: ItemStore<K, V>> NodeRef<
         }
 
         // Removes this node. might leave behind a double-black node:
-        fn remove<K: Ord+Clone+Send+Share, V: Clone+Send+Share, IS: ItemStore<K, V>>(
+        fn remove<K: Ord+Clone+Send+Sync, V: Clone+Send+Sync, IS: ItemStore<K, V>>(
             node: &NodeRef<K, V, IS>) -> NodeRef<K, V, IS> {
             assert!(!node.is_leaf());
 
@@ -494,8 +494,8 @@ impl<K: Ord+Clone+Send+Share, V: Clone+Send+Share, IS: ItemStore<K, V>> NodeRef<
         }
 
         // Kills a double-black, or moves it to the top:
-        fn bubble<K: Ord+Clone+Send+Share,
-                  V: Clone+Send+Share,
+        fn bubble<K: Ord+Clone+Send+Sync,
+                  V: Clone+Send+Sync,
                   IS: ItemStore<K, V>>(
                     color: Color,
                     l: NodeRef<K, V, IS>,
@@ -510,8 +510,8 @@ impl<K: Ord+Clone+Send+Share, V: Clone+Send+Share, IS: ItemStore<K, V>> NodeRef<
         }
 
         // Removes the max node:
-        fn remove_max<K: Ord+Clone+Send+Share,
-                      V: Clone+Send+Share,
+        fn remove_max<K: Ord+Clone+Send+Sync,
+                      V: Clone+Send+Sync,
                       IS: ItemStore<K, V>>(
                         node: &NodeRef<K, V, IS>)
                      -> NodeRef<K, V, IS> {
@@ -532,13 +532,21 @@ impl<K: Ord+Clone+Send+Share, V: Clone+Send+Share, IS: ItemStore<K, V>> NodeRef<
     }
 }
 
-#[deriving(Clone)]
 struct RedBlackTree<K, V, IS> {
     root: NodeRef<K, V, IS>,
     len: uint,
 }
 
-impl<K: Ord+Clone+Send+Share, V: Clone+Send+Share, IS: ItemStore<K, V>> RedBlackTree<K, V, IS> {
+impl<K, V, IS: ItemStore<K, V>> Clone for RedBlackTree<K, V, IS> {
+    fn clone(&self) -> RedBlackTree<K, V, IS> {
+        RedBlackTree {
+            root: self.root.clone(),
+            len: self.len
+        }
+    }
+}
+
+impl<K: Ord+Clone+Send+Sync, V: Clone+Send+Sync, IS: ItemStore<K, V>> RedBlackTree<K, V, IS> {
     pub fn new() -> RedBlackTree<K, V, IS> {
         RedBlackTree {
             root: new_leaf(Black),
@@ -573,7 +581,7 @@ impl<K: Ord+Clone+Send+Share, V: Clone+Send+Share, IS: ItemStore<K, V>> RedBlack
     // }
 }
 
-impl<K: Hash+Eq+Send+Share+Ord+Clone, V: Send+Share+Clone> PersistentMap<K, V> for RedBlackTree<K, V, CopyStore<K, V>> {
+impl<K: Hash+Eq+Send+Sync+Ord+Clone, V: Send+Sync+Clone> PersistentMap<K, V> for RedBlackTree<K, V, CopyStore<K, V>> {
     #[inline]
     fn insert(self, key: K, value: V) -> (RedBlackTree<K, V, CopyStore<K, V>>, bool) {
         self.insert(CopyStore::new(key, value))
@@ -585,7 +593,7 @@ impl<K: Hash+Eq+Send+Share+Ord+Clone, V: Send+Share+Clone> PersistentMap<K, V> f
     }
 }
 
-impl<K: Hash+Eq+Send+Share+Ord+Clone, V: Send+Share+Clone> PersistentMap<K, V> for RedBlackTree<K, V, ShareStore<K, V>> {
+impl<K: Hash+Eq+Send+Sync+Ord+Clone, V: Send+Sync+Clone> PersistentMap<K, V> for RedBlackTree<K, V, ShareStore<K, V>> {
     #[inline]
     fn insert(self, key: K, value: V) -> (RedBlackTree<K, V, ShareStore<K, V>>, bool) {
         self.insert(ShareStore::new(key, value))
@@ -597,14 +605,14 @@ impl<K: Hash+Eq+Send+Share+Ord+Clone, V: Send+Share+Clone> PersistentMap<K, V> f
     }
 }
 
-impl<K: Hash+Eq+Send+Share+Ord+Clone, V: Send+Share+Clone, IS: ItemStore<K, V>> Map<K, V> for RedBlackTree<K, V, IS> {
+impl<K: Hash+Eq+Send+Sync+Ord+Clone, V: Send+Sync+Clone, IS: ItemStore<K, V>> Map<K, V> for RedBlackTree<K, V, IS> {
     #[inline]
     fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
         self.find(key)
     }
 }
 
-impl<K: Hash+Eq+Send+Share+Ord+Clone, V: Send+Share+Clone, IS: ItemStore<K, V>> Collection for RedBlackTree<K, V, IS> {
+impl<K: Hash+Eq+Send+Sync+Ord+Clone, V: Send+Sync+Clone, IS: ItemStore<K, V>> Collection for RedBlackTree<K, V, IS> {
     #[inline]
     fn len(&self) -> uint {
         self.len

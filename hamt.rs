@@ -53,7 +53,7 @@ enum NodeRefBorrowResult<'a, K, V, IS, H> {
     SharedNode(&'a UnsafeNode<K, V, IS, H>),
 }
 
-impl<K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>> NodeRef<K, V, IS, H> {
+impl<K: Eq+Send+Sync, V: Send+Sync, IS: ItemStore<K, V>, S, H: Hasher<S>> NodeRef<K, V, IS, H> {
 
     fn borrow<'a>(&'a self) -> &'a UnsafeNode<K, V, IS, H> {
         unsafe {
@@ -163,7 +163,7 @@ enum NodeEntryRef<'a, K, V, IS, H> {
     SubTreeEntryRef(&'a NodeRef<K, V, IS, H>)
 }
 
-impl<'a, K: Send+Share, V: Send+Share, IS: ItemStore<K, V>, H> NodeEntryRef<'a, K, V, IS, H> {
+impl<'a, K: Send+Sync, V: Send+Sync, IS: ItemStore<K, V>, H> NodeEntryRef<'a, K, V, IS, H> {
     // Clones the contents of a NodeEntryRef into a NodeEntryOwned value to be used elsewhere.
     fn clone_out(&self) -> NodeEntryOwned<K, V, IS, H> {
         match *self {
@@ -370,7 +370,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H> {
 }
 
 // impl UnsafeNode (continued)
-impl<K: Eq+Send+Share+Hash<S>, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>>
+impl<K: Eq+Send+Sync+Hash<S>, V: Send+Sync, IS: ItemStore<K, V>, S, H: Hasher<S>>
 UnsafeNode<K, V, IS, H> {
     // Insert a new key-value pair into the tree. The existing tree is not modified and a new tree
     // is created. This new tree will share most nodes with the existing one.
@@ -693,7 +693,7 @@ UnsafeNode<K, V, IS, H> {
                             assert!(items.len() == 2);
                             assert!(position == 0 || position == 1);
                             let index_of_remaining_item = 1 - position;
-                            let kvp = items.get(index_of_remaining_item).clone();
+                            let kvp = items[index_of_remaining_item].clone();
 
                             ItemEntryOwned(kvp)
                         };
@@ -795,7 +795,7 @@ UnsafeNode<K, V, IS, H> {
                             assert!(items.len() == 2);
                             assert!(position == 0 || position == 1);
                             let index_of_remaining_item = 1 - position;
-                            let kvp = items.get(index_of_remaining_item).clone();
+                            let kvp = (**items)[index_of_remaining_item].clone();
 
                             ItemEntryOwned(kvp)
                         };
@@ -1122,7 +1122,7 @@ pub struct HamtMap<K, V, IS, H> {
 }
 
 // impl HamtMap
-impl<K: Eq+Send+Share+Hash<S>, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
+impl<K: Eq+Send+Sync+Hash<S>, V: Send+Sync, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
 HamtMap<K, V, IS, H> {
 
     pub fn new(hasher: H) -> HamtMap<K, V, IS, H> {
@@ -1260,7 +1260,7 @@ HamtMap<K, V, IS, H> {
 }
 
 // Clone for HamtMap
-impl<K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
+impl<K: Eq+Send+Sync, V: Send+Sync, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
 Clone for HamtMap<K, V, IS, H> {
 
     fn clone(&self) -> HamtMap<K, V, IS, H> {
@@ -1273,7 +1273,7 @@ Clone for HamtMap<K, V, IS, H> {
 }
 
 // Container for HamtMap
-impl<K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>>
+impl<K: Eq+Send+Sync, V: Send+Sync, IS: ItemStore<K, V>, S, H: Hasher<S>>
 Collection for HamtMap<K, V, IS, H> {
 
     fn len(&self) -> uint {
@@ -1282,7 +1282,7 @@ Collection for HamtMap<K, V, IS, H> {
 }
 
 // Map for HamtMap
-impl<K: Eq+Send+Share+Hash<S>, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
+impl<K: Eq+Send+Sync+Hash<S>, V: Send+Sync, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
 Map<K, V> for HamtMap<K, V, IS, H> {
 
     fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
@@ -1291,7 +1291,7 @@ Map<K, V> for HamtMap<K, V, IS, H> {
 }
 
 // PersistentMap for HamtMap<CopyStore>
-impl<K: Eq+Send+Share+Clone+Hash<S>, V: Send+Share+Clone, S, H: Hasher<S>+Clone>
+impl<K: Eq+Send+Sync+Clone+Hash<S>, V: Send+Sync+Clone, S, H: Hasher<S>+Clone>
 PersistentMap<K, V> for HamtMap<K, V, CopyStore<K, V>, H> {
 
     fn insert(self, key: K, value: V) -> (HamtMap<K, V, CopyStore<K, V>, H>, bool) {
@@ -1304,7 +1304,7 @@ PersistentMap<K, V> for HamtMap<K, V, CopyStore<K, V>, H> {
 }
 
 // PersistentMap for HamtMap<ShareStore>
-impl<K: Eq+Send+Share+Hash<S>, V: Send+Share, S, H: Hasher<S>+Clone>
+impl<K: Eq+Send+Sync+Hash<S>, V: Send+Sync, S, H: Hasher<S>+Clone>
 PersistentMap<K, V> for HamtMap<K, V, ShareStore<K, V>, H> {
 
     fn insert(self, key: K, value: V) -> (HamtMap<K, V, ShareStore<K, V>, H>, bool) {
@@ -1334,7 +1334,7 @@ pub struct HamtMapIterator<'a, K, V, IS, H> {
     len: uint,
 }
 
-impl<'a, K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>>
+impl<'a, K: Eq+Send+Sync, V: Send+Sync, IS: ItemStore<K, V>, S, H: Hasher<S>>
 HamtMapIterator<'a, K, V, IS, H> {
 
     fn new<'a>(map: &'a HamtMap<K, V, IS, H>) -> HamtMapIterator<'a, K, V, IS, H> {
@@ -1349,7 +1349,7 @@ HamtMapIterator<'a, K, V, IS, H> {
     }
 }
 
-impl<'a, K: Eq+Send+Share, V: Send+Share, IS: ItemStore<K, V>, S, H: Hasher<S>>
+impl<'a, K: Eq+Send+Sync, V: Send+Sync, IS: ItemStore<K, V>, S, H: Hasher<S>>
 Iterator<(&'a K, &'a V)> for HamtMapIterator<'a, K, V, IS, H> {
 
     fn next(&mut self) -> Option<(&'a K, &'a V)> {
@@ -1378,7 +1378,7 @@ Iterator<(&'a K, &'a V)> for HamtMapIterator<'a, K, V, IS, H> {
                         let items = items_arc.deref();
                         self.node_stack[self.stack_size] = (IterCollisionEntryRef(items), 0);
                         self.stack_size += 1;
-                        let item = &items.get(0);
+                        let item = &items[0];
                         return Some((item.key(), item.val()));
                     },
                     SubTreeEntryRef(subtree_ref) => {
@@ -1394,7 +1394,7 @@ Iterator<(&'a K, &'a V)> for HamtMapIterator<'a, K, V, IS, H> {
                     return self.next();
                 }
 
-                let item = &items_ref.get(next_index);
+                let item = &items_ref[next_index];
                 return Some((item.key(), item.val()));
             }
             IterEmpty => unreachable!()
@@ -1416,7 +1416,7 @@ struct HamtSet<V, H> {
 }
 
 // Set for HamtSet
-impl<V: Send+Share+Eq+Hash<S>, S, H: Hasher<S>+Clone>
+impl<V: Send+Sync+Eq+Hash<S>, S, H: Hasher<S>+Clone>
 Set<V> for HamtSet<V, H> {
     fn contains(&self, value: &V) -> bool {
         self.data.contains_key(value)
@@ -1452,7 +1452,7 @@ Set<V> for HamtSet<V, H> {
 }
 
 // Clone for HamtSet
-impl<V: Eq+Send+Share, S, H: Hasher<S>+Clone>
+impl<V: Eq+Send+Sync, S, H: Hasher<S>+Clone>
 Clone for HamtSet<V, H> {
 
     fn clone(&self) -> HamtSet<V, H> {
@@ -1463,7 +1463,7 @@ Clone for HamtSet<V, H> {
 }
 
 // Container for HamtSet
-impl<V: Eq+Send+Share, S, H: Hasher<S>>
+impl<V: Eq+Send+Sync, S, H: Hasher<S>>
 Collection for HamtSet<V, H> {
 
     fn len(&self) -> uint {
