@@ -1,8 +1,8 @@
 before_install:
-  - yes | sudo add-apt-repository ppa:hansjorg/rust
-  - sudo apt-get update
+  - sudo add-apt-repository --yes ppa:hansjorg/rust
+  - sudo add-apt-repository --yes ppa:cmrx64/cargo
+  - sudo apt-get update -qq
 install:
-  - sudo apt-get install rust-nightly
+  - sudo apt-get install -qq rust-nightly cargo
 script:
-  - rustc --test -o persistent-datastructures ./lib.rs
-  - ./persistent-datastructures
+  - cargo build
