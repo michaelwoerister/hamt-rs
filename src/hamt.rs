@@ -1113,28 +1113,32 @@ UnsafeNode<K, V, IS, H> {
 
 
 //=-------------------------------------------------------------------------------------------------
-// HamtMap
+// GenericHamtMap
 //=-------------------------------------------------------------------------------------------------
-pub struct HamtMap<K, V, IS, H> {
+pub struct GenericHamtMap<K, V, IS, H> {
     root: NodeRef<K, V, IS, H>,
     hasher: H,
     element_count: uint,
 }
 
-// impl HamtMap
-impl<K: Eq+Send+Sync+Hash<S>, V: Send+Sync, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
-HamtMap<K, V, IS, H> {
+// impl GenericHamtMap
+impl<K: Eq+Send+Sync+Hash<S>,
+     V: Send+Sync,
+     IS: ItemStore<K, V>,
+     S,
+     H: Hasher<S>+Clone>
+GenericHamtMap<K, V, IS, H> {
 
-    pub fn new(hasher: H) -> HamtMap<K, V, IS, H> {
-        HamtMap {
+    pub fn new(hasher: H) -> GenericHamtMap<K, V, IS, H> {
+        GenericHamtMap {
             root: UnsafeNode::alloc(0, 0),
             hasher: hasher,
             element_count: 0
         }
     }
 
-    pub fn iter<'a>(&'a self) -> HamtMapIterator<'a, K, V, IS, H> {
-        HamtMapIterator::new(self)
+    pub fn iter<'a>(&'a self) -> GenericHamtMapIterator<'a, K, V, IS, H> {
+        GenericHamtMapIterator::new(self)
     }
 
     fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
@@ -1178,8 +1182,8 @@ HamtMap<K, V, IS, H> {
         }
     }
 
-    fn insert_internal(self, kvp: IS) -> (HamtMap<K, V, IS, H>, bool) {
-        let HamtMap { mut root, hasher, element_count } = self;
+    fn insert_internal(self, kvp: IS) -> (GenericHamtMap<K, V, IS, H>, bool) {
+        let GenericHamtMap { mut root, hasher, element_count } = self;
         let hash = hasher.hash(kvp.key());
         let mut insertion_count = 0xdeadbeaf;
 
@@ -1194,7 +1198,7 @@ HamtMap<K, V, IS, H> {
 
         match new_root {
             Some(r) => (
-                HamtMap {
+                GenericHamtMap {
                     root: r,
                     hasher: hasher,
                     element_count: element_count + insertion_count
@@ -1202,7 +1206,7 @@ HamtMap<K, V, IS, H> {
                 insertion_count != 0
             ),
             None => (
-                HamtMap {
+                GenericHamtMap {
                     root: root,
                     hasher: hasher,
                     element_count: element_count + insertion_count
@@ -1212,8 +1216,8 @@ HamtMap<K, V, IS, H> {
         }
     }
 
-    fn try_remove_in_place(self, key: &K) -> (HamtMap<K, V, IS, H>, bool) {
-        let HamtMap { mut root, hasher, element_count } = self;
+    fn try_remove_in_place(self, key: &K) -> (GenericHamtMap<K, V, IS, H>, bool) {
+        let GenericHamtMap { mut root, hasher, element_count } = self;
         let hash = hasher.hash(key);
         let mut removal_count = 0xdeadbeaf;
 
@@ -1225,12 +1229,12 @@ HamtMap<K, V, IS, H> {
         let new_element_count = element_count - removal_count;
 
         (match removal_result {
-            NoChange => HamtMap {
+            NoChange => GenericHamtMap {
                 root: root,
                 hasher: hasher,
                 element_count: new_element_count
             },
-            ReplaceSubTree(new_root) => HamtMap {
+            ReplaceSubTree(new_root) => GenericHamtMap {
                 root: new_root,
                 hasher: hasher,
                 element_count: new_element_count
@@ -1245,7 +1249,7 @@ HamtMap<K, V, IS, H> {
                     let root = new_root_ref.borrow_mut();
                     root.init_entry(0, ItemEntryOwned(kvp));
                 }
-                HamtMap {
+                GenericHamtMap {
                     root: new_root_ref,
                     hasher: hasher,
                     element_count: new_element_count
@@ -1253,18 +1257,18 @@ HamtMap<K, V, IS, H> {
             }
             KillSubTree => {
                 assert!(bit_count(root.borrow().mask) == 1);
-                HamtMap::new(hasher)
+                GenericHamtMap::new(hasher)
             }
         }, removal_count != 0)
     }
 }
 
-// Clone for HamtMap
+// Clone for GenericHamtMap
 impl<K: Eq+Send+Sync, V: Send+Sync, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
-Clone for HamtMap<K, V, IS, H> {
+Clone for GenericHamtMap<K, V, IS, H> {
 
-    fn clone(&self) -> HamtMap<K, V, IS, H> {
-        HamtMap {
+    fn clone(&self) -> GenericHamtMap<K, V, IS, H> {
+        GenericHamtMap {
             root: self.root.clone(),
             hasher: self.hasher.clone(),
             element_count: self.element_count
@@ -1272,54 +1276,130 @@ Clone for HamtMap<K, V, IS, H> {
     }
 }
 
-// Container for HamtMap
+// Container for GenericHamtMap
 impl<K: Eq+Send+Sync, V: Send+Sync, IS: ItemStore<K, V>, S, H: Hasher<S>>
-Collection for HamtMap<K, V, IS, H> {
+Collection for GenericHamtMap<K, V, IS, H> {
 
     fn len(&self) -> uint {
         self.element_count
     }
 }
 
-// Map for HamtMap
+// Map for GenericHamtMap
 impl<K: Eq+Send+Sync+Hash<S>, V: Send+Sync, IS: ItemStore<K, V>, S, H: Hasher<S>+Clone>
-Map<K, V> for HamtMap<K, V, IS, H> {
+Map<K, V> for GenericHamtMap<K, V, IS, H> {
 
     fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
         self.find(key)
     }
 }
 
-// PersistentMap for HamtMap<CopyStore>
+// PersistentMap for GenericHamtMap<CopyStore>
 impl<K: Eq+Send+Sync+Clone+Hash<S>, V: Send+Sync+Clone, S, H: Hasher<S>+Clone>
-PersistentMap<K, V> for HamtMap<K, V, CopyStore<K, V>, H> {
+PersistentMap<K, V> for GenericHamtMap<K, V, CopyStore<K, V>, H> {
 
-    fn insert(self, key: K, value: V) -> (HamtMap<K, V, CopyStore<K, V>, H>, bool) {
+    fn insert(self, key: K, value: V) -> (GenericHamtMap<K, V, CopyStore<K, V>, H>, bool) {
         self.insert_internal(CopyStore::new(key, value))
     }
 
-    fn remove(self, key: &K) -> (HamtMap<K, V, CopyStore<K, V>, H>, bool) {
+    fn remove(self, key: &K) -> (GenericHamtMap<K, V, CopyStore<K, V>, H>, bool) {
         self.try_remove_in_place(key)
     }
 }
 
-// PersistentMap for HamtMap<ShareStore>
+// PersistentMap for GenericHamtMap<ShareStore>
 impl<K: Eq+Send+Sync+Hash<S>, V: Send+Sync, S, H: Hasher<S>+Clone>
-PersistentMap<K, V> for HamtMap<K, V, ShareStore<K, V>, H> {
+PersistentMap<K, V> for GenericHamtMap<K, V, ShareStore<K, V>, H> {
 
-    fn insert(self, key: K, value: V) -> (HamtMap<K, V, ShareStore<K, V>, H>, bool) {
+    fn insert(self, key: K, value: V) -> (GenericHamtMap<K, V, ShareStore<K, V>, H>, bool) {
         self.insert_internal(ShareStore::new(key,value))
     }
 
-    fn remove(self, key: &K) -> (HamtMap<K, V, ShareStore<K, V>, H>, bool) {
+    fn remove(self, key: &K) -> (GenericHamtMap<K, V, ShareStore<K, V>, H>, bool) {
         self.try_remove_in_place(key)
     }
 }
 
+//=-------------------------------------------------------------------------------------------------
+// HamtMap
+//=-------------------------------------------------------------------------------------------------
+pub struct HamtMap<K, V> {
+    map: GenericHamtMap<K, V, ShareStore<K, V>, ::std::hash::sip::SipHasher>
+}
 
+impl<K: Eq+Send+Sync+Hash<::std::hash::sip::SipState>,
+     V: Send+Sync>
+HamtMap<K, V> {
+
+    #[inline(always)]
+    pub fn new() -> HamtMap<K, V> {
+        HamtMap { map: GenericHamtMap::new(::std::hash::sip::SipHasher::new()) }
+    }
+
+    #[inline(always)]
+    pub fn insert(self, key: K, value: V) -> (HamtMap<K, V>, bool) {
+        let (new_map, size_changed) = self.map.insert(key, value);
+        (HamtMap { map: new_map }, size_changed)
+    }
+
+    #[inline(always)]
+    pub fn remove(self, key: &K) -> (HamtMap<K, V>, bool) {
+        let (new_map, size_changed) = self.map.remove(key);
+        (HamtMap { map: new_map }, size_changed)
+    }
+
+    #[inline(always)]
+    pub fn plus(self, key: K, val: V) -> HamtMap<K, V> {
+        self.insert(key, val).val0()
+    }
+
+    #[inline(always)]
+    pub fn minus(self, key: &K) -> HamtMap<K, V> {
+        self.remove(key).val0()
+    }
+}
 
 //=-------------------------------------------------------------------------------------------------
-// HamtMapIterator
+// HamtMap
+//=-------------------------------------------------------------------------------------------------
+pub struct CloningHamtMap<K, V> {
+    map: GenericHamtMap<K, V, CopyStore<K, V>, ::std::hash::sip::SipHasher>
+}
+
+impl<K: Eq+Send+Sync+Hash<::std::hash::sip::SipState>+Clone,
+     V: Send+Sync+Clone>
+CloningHamtMap<K, V> {
+
+    #[inline(always)]
+    pub fn new() -> CloningHamtMap<K, V> {
+        CloningHamtMap { map: GenericHamtMap::new(::std::hash::sip::SipHasher::new()) }
+    }
+
+    #[inline(always)]
+    pub fn insert(self, key: K, value: V) -> (CloningHamtMap<K, V>, bool) {
+        let (new_map, size_changed) = self.map.insert(key, value);
+        (CloningHamtMap { map: new_map }, size_changed)
+    }
+
+    #[inline(always)]
+    pub fn remove(self, key: &K) -> (CloningHamtMap<K, V>, bool) {
+        let (new_map, size_changed) = self.map.remove(key);
+        (CloningHamtMap { map: new_map }, size_changed)
+    }
+
+    #[inline(always)]
+    pub fn plus(self, key: K, val: V) -> CloningHamtMap<K, V> {
+        self.insert(key, val).val0()
+    }
+
+    #[inline(always)]
+    pub fn minus(self, key: &K) -> CloningHamtMap<K, V> {
+        self.remove(key).val0()
+    }
+}
+
+//=-------------------------------------------------------------------------------------------------
+// GenericHamtMapIterator
 //=-------------------------------------------------------------------------------------------------
 
 enum IteratorNodeRef<'a, K, V, IS, H> {
@@ -1328,17 +1408,17 @@ enum IteratorNodeRef<'a, K, V, IS, H> {
     IterEmpty
 }
 
-pub struct HamtMapIterator<'a, K, V, IS, H> {
+pub struct GenericHamtMapIterator<'a, K, V, IS, H> {
     node_stack: [(IteratorNodeRef<'a, K, V, IS, H>, int), .. LAST_LEVEL + 2],
     stack_size: uint,
     len: uint,
 }
 
 impl<'a, K: Eq+Send+Sync, V: Send+Sync, IS: ItemStore<K, V>, S, H: Hasher<S>>
-HamtMapIterator<'a, K, V, IS, H> {
+GenericHamtMapIterator<'a, K, V, IS, H> {
 
-    fn new<'a>(map: &'a HamtMap<K, V, IS, H>) -> HamtMapIterator<'a, K, V, IS, H> {
-        let mut iterator = HamtMapIterator {
+    fn new<'a>(map: &'a GenericHamtMap<K, V, IS, H>) -> GenericHamtMapIterator<'a, K, V, IS, H> {
+        let mut iterator = GenericHamtMapIterator {
             node_stack: unsafe{ intrinsics::uninit() },
             stack_size: 1,
             len: map.element_count,
@@ -1350,7 +1430,7 @@ HamtMapIterator<'a, K, V, IS, H> {
 }
 
 impl<'a, K: Eq+Send+Sync, V: Send+Sync, IS: ItemStore<K, V>, S, H: Hasher<S>>
-Iterator<(&'a K, &'a V)> for HamtMapIterator<'a, K, V, IS, H> {
+Iterator<(&'a K, &'a V)> for GenericHamtMapIterator<'a, K, V, IS, H> {
 
     fn next(&mut self) -> Option<(&'a K, &'a V)> {
         if self.stack_size == 0 {
@@ -1410,9 +1490,9 @@ Iterator<(&'a K, &'a V)> for HamtMapIterator<'a, K, V, IS, H> {
 
 //=-------------------------------------------------------------------------------------------------
 // HamtSet
-//=------------------------------------------------------------------------------------------------
+//=-------------------------------------------------------------------------------------------------
 struct HamtSet<V, H> {
-    data: HamtMap<V, (), ShareStore<V, ()>, H>
+    data: GenericHamtMap<V, (), ShareStore<V, ()>, H>
 }
 
 // Set for HamtSet
@@ -1497,7 +1577,7 @@ fn align_to(size: uint, align: uint) -> uint {
 #[cfg(test)]
 mod tests {
     use super::get_index;
-    use super::HamtMap;
+    use super::GenericHamtMap;
     use testing::Test;
     use test::Bencher;
     use std::collections::HashMap;
@@ -1520,12 +1600,12 @@ mod tests {
     }
 
 //=-------------------------------------------------------------------------------------------------
-// Test HamtMap<CopyStore>
+// Test GenericHamtMap<CopyStore>
 //=-------------------------------------------------------------------------------------------------
 
     #[test]
     fn test_iterator_copy() {
-        let mut map: HamtMap<u64, u64, CopyStore, SipHasher> = HamtMap::new(SipHasher::new());
+        let mut map: GenericHamtMap<u64, u64, CopyStore, SipHasher> = GenericHamtMap::new(SipHasher::new());
         let count = 1000u;
 
         for i in range(0u64, count as u64) {
@@ -1546,101 +1626,101 @@ mod tests {
 
     #[test]
     fn test_insert_copy() {
-        Test::test_insert(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()));
+        Test::test_insert(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()));
     }
 
     #[test]
     fn test_insert_ascending_copy() {
-        Test::test_insert_ascending(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()));
+        Test::test_insert_ascending(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()));
     }
 
     #[test]
     fn test_insert_descending_copy() {
-        Test::test_insert_descending(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()));
+        Test::test_insert_descending(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()));
     }
 
     #[test]
     fn test_insert_overwrite_copy() {
-        Test::test_insert_overwrite(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()));
+        Test::test_insert_overwrite(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()));
     }
 
     #[test]
     fn test_remove_copy() {
-        Test::test_remove(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()));
+        Test::test_remove(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()));
     }
 
     #[test]
     fn stress_test_copy() {
-        Test::random_insert_remove_stress_test(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()));
+        Test::random_insert_remove_stress_test(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()));
     }
 
 
 
 //=-------------------------------------------------------------------------------------------------
-// Bench HamtMap<CopyStore>
+// Bench GenericHamtMap<CopyStore>
 //=-------------------------------------------------------------------------------------------------
 
     #[bench]
     fn bench_insert_copy_10(bh: &mut Bencher) {
-        Test::bench_insert(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
+        Test::bench_insert(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
     fn bench_insert_copy_1000(bh: &mut Bencher) {
-        Test::bench_insert(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
+        Test::bench_insert(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
     fn bench_insert_copy_100000(bh: &mut Bencher) {
-        Test::bench_insert(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
+        Test::bench_insert(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
     #[bench]
     fn bench_find_copy_10(bh: &mut Bencher) {
-        Test::bench_find(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
+        Test::bench_find(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
     fn bench_find_copy_1000(bh: &mut Bencher) {
-        Test::bench_find(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
+        Test::bench_find(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
     fn bench_find_copy_100000(bh: &mut Bencher) {
-        Test::bench_find(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
+        Test::bench_find(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
     #[bench]
     fn bench_remove_copy_10(bh: &mut Bencher) {
-        Test::bench_remove(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
+        Test::bench_remove(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
     fn bench_remove_copy_1000(bh: &mut Bencher) {
-        Test::bench_remove(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
+        Test::bench_remove(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
     fn bench_remove_copy_100000(bh: &mut Bencher) {
-        Test::bench_remove(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
+        Test::bench_remove(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
     #[bench]
     fn bench_iterate_copy_10(bh: &mut Bencher) {
-        bench_iterator_copy(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
+        bench_iterator_copy(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
     fn bench_iterate_copy_1000(bh: &mut Bencher) {
-        bench_iterator_copy(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
+        bench_iterator_copy(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
     fn bench_iterate_copy_100000(bh: &mut Bencher) {
-        bench_iterator_copy(HamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
+        bench_iterator_copy(GenericHamtMap::<u64, u64, CopyStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
-    fn bench_iterator_copy(mut map: HamtMap<u64, u64, CopyStore, SipHasher>,
+    fn bench_iterator_copy(mut map: GenericHamtMap<u64, u64, CopyStore, SipHasher>,
                            size: uint,
                            bh: &mut Bencher) {
         for i in range(0u64, size as u64) {
@@ -1655,12 +1735,12 @@ mod tests {
 
 
 //=-------------------------------------------------------------------------------------------------
-// Test HamtMap<ShareStore>
+// Test GenericHamtMap<ShareStore>
 //=-------------------------------------------------------------------------------------------------
 
     #[test]
     fn test_iterator_share() {
-        let mut map: HamtMap<u64, u64, ShareStore, SipHasher> = HamtMap::new(SipHasher::new());
+        let mut map: GenericHamtMap<u64, u64, ShareStore, SipHasher> = GenericHamtMap::new(SipHasher::new());
         let count = 1000u;
 
         for i in range(0u64, count as u64) {
@@ -1681,99 +1761,99 @@ mod tests {
 
     #[test]
     fn test_insert_share() {
-        Test::test_insert(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()));
+        Test::test_insert(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()));
     }
 
     #[test]
     fn test_insert_ascending_share() {
-        Test::test_insert_ascending(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()));
+        Test::test_insert_ascending(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()));
     }
 
     #[test]
     fn test_insert_descending_share() {
-        Test::test_insert_descending(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()));
+        Test::test_insert_descending(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()));
     }
 
     #[test]
     fn test_insert_overwrite_share() {
-        Test::test_insert_overwrite(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()));
+        Test::test_insert_overwrite(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()));
     }
 
     #[test]
     fn test_remove_share() {
-        Test::test_remove(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()));
+        Test::test_remove(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()));
     }
 
     #[test]
     fn stress_test_share() {
-        Test::random_insert_remove_stress_test(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()));
+        Test::random_insert_remove_stress_test(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()));
     }
 
 //=-------------------------------------------------------------------------------------------------
-// Bench HamtMap<ShareStore>
+// Bench GenericHamtMap<ShareStore>
 //=-------------------------------------------------------------------------------------------------
 
     #[bench]
     fn bench_insert_share_10(bh: &mut Bencher) {
-        Test::bench_insert(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
+        Test::bench_insert(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
     fn bench_insert_share_1000(bh: &mut Bencher) {
-        Test::bench_insert(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
+        Test::bench_insert(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
     fn bench_insert_share_100000(bh: &mut Bencher) {
-        Test::bench_insert(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
+        Test::bench_insert(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
     #[bench]
     fn bench_find_share_10(bh: &mut Bencher) {
-        Test::bench_find(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
+        Test::bench_find(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
     fn bench_find_share_1000(bh: &mut Bencher) {
-        Test::bench_find(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
+        Test::bench_find(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
     fn bench_find_share_100000(bh: &mut Bencher) {
-        Test::bench_find(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
+        Test::bench_find(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
     #[bench]
     fn bench_remove_share_10(bh: &mut Bencher) {
-        Test::bench_remove(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
+        Test::bench_remove(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
     fn bench_remove_share_1000(bh: &mut Bencher) {
-        Test::bench_remove(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
+        Test::bench_remove(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
     fn bench_remove_share_100000(bh: &mut Bencher) {
-        Test::bench_remove(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
+        Test::bench_remove(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
     #[bench]
     fn bench_iterate_share_10(bh: &mut Bencher) {
-        bench_iterator_share(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
+        bench_iterator_share(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 10, bh);
     }
 
     #[bench]
     fn bench_iterate_share_1000(bh: &mut Bencher) {
-        bench_iterator_share(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
+        bench_iterator_share(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 1000, bh);
     }
 
     #[bench]
     fn bench_iterate_share_100000(bh: &mut Bencher) {
-        bench_iterator_share(HamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
+        bench_iterator_share(GenericHamtMap::<u64, u64, ShareStore, SipState, SipHasher>::new(SipHasher::new()), 100000, bh);
     }
 
-    fn bench_iterator_share(mut map: HamtMap<u64, u64, ShareStore, SipHasher>,
+    fn bench_iterator_share(mut map: GenericHamtMap<u64, u64, ShareStore, SipHasher>,
                             size: uint,
                             bh: &mut Bencher) {
         for i in range(0u64, size as u64) {

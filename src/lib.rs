@@ -33,9 +33,9 @@ extern crate test;
 
 extern crate sync;
 
-use std::hash::sip::SipHasher;
-
-pub use hamt::HamtMapIterator;
+pub use hamt::GenericHamtMapIterator;
+pub use hamt::HamtMap;
+pub use hamt::CloningHamtMap;
 
 mod hamt;
 mod item_store;
@@ -74,10 +74,6 @@ pub trait PersistentMap<K, V>: Map<K, V> + Clone {
         self.remove(key).val0()
     }
 }
-
-pub type HamtMap<K, V, H=SipHasher> = hamt::HamtMap<K, V, item_store::ShareStore<K, V>, H>;
-pub type CloningHamtMap<K, V, H=SipHasher> = hamt::HamtMap<K, V, item_store::CopyStore<K, V>, H>;
-
 
 /// A trait to represent persistent sets. Objects implementing this trait are supposed to be
 /// cheaply copyable. Typically they can be seen as a kind of smart pointer with similar performance
