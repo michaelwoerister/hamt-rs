@@ -1,5 +1,5 @@
 [package]
 
-name = "rs-persistent-datastructures"
+name = "hamt"
 version = "0.1.0"
 authors = [ "michaelwoerister@posteo.net" ]
