@@ -29,7 +29,7 @@ for (k, v) in map.iter() {
 ```
 
 ## Performance
-Looks pretty good so far, for a fully persistent data structure. The benchmarks below where done on
+Looks pretty good so far, for a fully persistent data structure. The benchmarks below were done on
 a Core i5 2400, with random numbers and the compile flags `-O --test -Zlto -C target-cpu=corei7-avx`.
 I also turned off (commented out) the assertions in the code, which should not be necessary in a
 release build.
