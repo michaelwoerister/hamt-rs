@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 use test::Bencher;
 
-use PersistentMap;
+use item_store::ItemStore;
+use hamt::HamtMap;
 
 macro_rules! assert_find(
     ($map:ident, $key:expr, None) => (
@@ -15,19 +16,20 @@ macro_rules! assert_find(
             Some(&value) => {
                 assert_eq!(value, $val);
             }
-            _ => fail!()
+            _ => panic!()
         };
     );
-)
+);
 
 static BENCH_FIND_COUNT: uint = 1000;
 static BENCH_INSERT_COUNT: uint = 1000;
 
 pub struct Test;
 
-impl<TPersistentMap: PersistentMap<u64, u64>> Test {
+impl<IS> Test
+    where IS: ItemStore<u64, u64> {
 
-    pub fn test_insert(empty: TPersistentMap) {
+    pub fn test_insert(empty: HamtMap<u64, u64, IS>) {
         let map00 = empty;
         let (map01, new_entry01) = map00.clone().insert(1, 2);
         let (map10, new_entry10) = map00.clone().insert(2, 4);
@@ -55,50 +57,50 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
         assert_eq!(map11.len(), 2);
     }
 
-    pub fn test_insert_ascending(empty: TPersistentMap) {
+    pub fn test_insert_ascending(empty: HamtMap<u64, u64, IS>) {
         let mut map = empty;
 
         for x in range(0u64, 1000u64) {
             assert_eq!(map.len(), x as uint);
-            map = map.insert(x, x).val0();
+            map = map.insert(x, x).0;
             assert_find!(map, x, x);
         }
     }
 
-    pub fn test_insert_descending(empty: TPersistentMap) {
+    pub fn test_insert_descending(empty: HamtMap<u64, u64, IS>) {
         let mut map = empty;
 
         for x in range(0u64, 1000u64) {
             let key = 999u64 - x;
             assert_eq!(map.len(), x as uint);
-            map = map.insert(key, x).val0();
+            map = map.insert(key, x).0;
             assert_find!(map, key, x);
         }
     }
 
-    pub fn test_insert_overwrite(empty: TPersistentMap) {
-        let (mapA, new_entryA) = empty.clone().insert(1, 2);
-        let (mapB, new_entryB) = mapA.clone().insert(1, 4);
-        let (mapC, new_entryC) = mapB.clone().insert(1, 6);
+    pub fn test_insert_overwrite(empty: HamtMap<u64, u64, IS>) {
+        let (map1, new_entry1) = empty.clone().insert(1, 2);
+        let (map2, new_entry2) = map1.clone().insert(1, 4);
+        let (map3, new_entry3) = map2.clone().insert(1, 6);
 
         assert_find!(empty, 1, None);
-        assert_find!(mapA, 1, 2);
-        assert_find!(mapB, 1, 4);
-        assert_find!(mapC, 1, 6);
+        assert_find!(map1, 1, 2);
+        assert_find!(map2, 1, 4);
+        assert_find!(map3, 1, 6);
 
-        assert_eq!(new_entryA, true);
-        assert_eq!(new_entryB, false);
-        assert_eq!(new_entryC, false);
+        assert_eq!(new_entry1, true);
+        assert_eq!(new_entry2, false);
+        assert_eq!(new_entry3, false);
 
         assert_eq!(empty.len(), 0);
-        assert_eq!(mapA.len(), 1);
-        assert_eq!(mapB.len(), 1);
-        assert_eq!(mapC.len(), 1);
+        assert_eq!(map1.len(), 1);
+        assert_eq!(map2.len(), 1);
+        assert_eq!(map3.len(), 1);
     }
 
-    pub fn test_remove(empty: TPersistentMap) {
+    pub fn test_remove(empty: HamtMap<u64, u64, IS>) {
         let (map00, _) = (empty
-            .insert(1, 2)).val0()
+            .insert(1, 2)).0
             .insert(2, 4);
 
         let (map01, _) = map00.clone().remove(&1);
@@ -123,7 +125,7 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
         assert_eq!(map11.len(), 0);
     }
 
-    pub fn random_insert_remove_stress_test(empty: TPersistentMap) {
+    pub fn random_insert_remove_stress_test(empty: HamtMap<u64, u64, IS>) {
         let mut reference: HashMap<u64, u64> = HashMap::new();
         let mut rng = StdRng::new().ok().expect("Could not create random number generator");
 
@@ -133,20 +135,20 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
             let value: u64 = rng.gen();
 
             if rng.gen_weighted_bool(2) {
-                let ref_size_change = reference.remove(&value);
+                let ref_size_change = reference.remove(&value).is_some();
                 let (map1, size_change) = map.remove(&value);
                 assert_eq!(ref_size_change, size_change);
                 assert_find!(map1, value, None);
                 assert_eq!(reference.len(), map1.len());
-                assert_eq!(reference.find(&value), map1.find(&value));
+                assert_eq!(reference.get(&value), map1.find(&value));
                 map = map1;
             } else {
-                let ref_size_change = reference.insert(value, value);
+                let ref_size_change = reference.insert(value, value).is_none();
                 let (map1, size_change) = map.insert(value, value);
                 assert_eq!(ref_size_change, size_change);
                 assert_find!(map1, value, value);
                 assert_eq!(reference.len(), map1.len());
-                assert_eq!(reference.find(&value), map1.find(&value));
+                assert_eq!(reference.get(&value), map1.find(&value));
                 map = map1;
             }
         }
@@ -170,11 +172,12 @@ fn create_unique_values(count: uint) -> Vec<u64> {
     create_random_std_hashmap(count).keys().map(|x| *x).collect()
 }
 
-pub static mut results: [Option<u64>, ..1000000] = [None, ..1000000];
+pub static mut results: [Option<u64>; 1000000] = [None; 1000000];
 
-impl<TPersistentMap: PersistentMap<u64, u64>> Test {
+impl<IS> Test
+    where IS: ItemStore<u64, u64> {
 
-    fn create_random_map(empty: TPersistentMap, count: uint) -> (TPersistentMap, Vec<u64>) {
+    fn create_random_map(empty: HamtMap<u64, u64, IS>, count: uint) -> (HamtMap<u64, u64, IS>, Vec<u64>) {
         let keys = create_unique_values(count);
         let mut map = empty;
 
@@ -185,7 +188,7 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
         return (map, keys);
     }
 
-    pub fn bench_find(empty: TPersistentMap, count: uint, bh: &mut Bencher) {
+    pub fn bench_find(empty: HamtMap<u64, u64, IS>, count: uint, bh: &mut Bencher) {
         let (map, keys) = Test::create_random_map(empty, count);
 
         bh.iter(|| {
@@ -204,7 +207,7 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
         })
     }
 
-    pub fn bench_insert(empty: TPersistentMap, count: uint, bh: &mut Bencher) {
+    pub fn bench_insert(empty: HamtMap<u64, u64, IS>, count: uint, bh: &mut Bencher) {
         let (map, keys) = Test::create_random_map(empty, count + BENCH_INSERT_COUNT);
 
         bh.iter(|| {
@@ -217,7 +220,7 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
         })
     }
 
-    pub fn bench_remove(empty: TPersistentMap, count: uint, bh: &mut Bencher) {
+    pub fn bench_remove(empty: HamtMap<u64, u64, IS>, count: uint, bh: &mut Bencher) {
         let (map, keys) = Test::create_random_map(empty, count);
 
         bh.iter(|| {
@@ -230,9 +233,9 @@ impl<TPersistentMap: PersistentMap<u64, u64>> Test {
     }
 }
 
-fn bench_find_hashmap<T: MutableMap<u64, u64>>(empty: T, count: uint, bh: &mut Bencher) {
+fn bench_find_hashmap(count: uint, bh: &mut Bencher) {
     let values = create_unique_values(count);
-    let mut map = empty;
+    let mut map = HashMap::new();
 
     for &x in values.iter() {
         map.insert(x, x);
@@ -243,7 +246,7 @@ fn bench_find_hashmap<T: MutableMap<u64, u64>>(empty: T, count: uint, bh: &mut B
             let val = values[i % count];
 
             unsafe {
-                match map.find(&val) {
+                match map.get(&val) {
                     Some(&x) => results[i] = Some(x),
                     None => results[i] = None,
                 }
@@ -252,9 +255,9 @@ fn bench_find_hashmap<T: MutableMap<u64, u64>>(empty: T, count: uint, bh: &mut B
     })
 }
 
-fn bench_insert_hashmap<T: MutableMap<u64, u64> + Clone>(empty: T, count: uint, bh: &mut Bencher) {
+fn bench_insert_hashmap(count: uint, bh: &mut Bencher) {
     let values = create_unique_values(count + BENCH_INSERT_COUNT);
-    let mut map = empty;
+    let mut map = HashMap::new();
 
     for &x in values.iter() {
         map.insert(x, x);
@@ -270,11 +273,9 @@ fn bench_insert_hashmap<T: MutableMap<u64, u64> + Clone>(empty: T, count: uint, 
     })
 }
 
-fn bench_clone_hashmap<T: MutableMap<u64, u64>+Clone>(empty: T,
-                                                        count: uint,
-                                                        bh: &mut Bencher) {
+fn bench_clone_hashmap(count: uint, bh: &mut Bencher) {
     let values = create_unique_values(count);
-    let mut map = empty;
+    let mut map = HashMap::new();
 
     for &x in values.iter() {
         map.insert(x, x);
@@ -285,9 +286,9 @@ fn bench_clone_hashmap<T: MutableMap<u64, u64>+Clone>(empty: T,
     })
 }
 
-fn bench_remove_hashmap<T: MutableMap<u64, u64>+Clone>(empty: T, count: uint, bh: &mut Bencher) {
+fn bench_remove_hashmap(count: uint, bh: &mut Bencher) {
     let values = create_unique_values(count);
-    let mut map = empty;
+    let mut map = HashMap::new();
 
     for &x in values.iter() {
         map.insert(x, x);
@@ -311,17 +312,17 @@ fn bench_remove_hashmap<T: MutableMap<u64, u64>+Clone>(empty: T, count: uint, bh
 
 #[bench]
 fn std_hashmap_find_10(bh: &mut Bencher) {
-    bench_find_hashmap(HashMap::<u64, u64>::new(), 10, bh);
+    bench_find_hashmap(10, bh);
 }
 
 #[bench]
 fn std_hashmap_find_1000(bh: &mut Bencher) {
-    bench_find_hashmap(HashMap::<u64, u64>::new(), 1000, bh);
+    bench_find_hashmap(1000, bh);
 }
 
 #[bench]
 fn std_hashmap_find_100000(bh: &mut Bencher) {
-    bench_find_hashmap(HashMap::<u64, u64>::new(), 100000, bh);
+    bench_find_hashmap(100000, bh);
 }
 
 
@@ -332,32 +333,32 @@ fn std_hashmap_find_100000(bh: &mut Bencher) {
 
 #[bench]
 fn std_hashmap_insert_10(bh: &mut Bencher) {
-    bench_insert_hashmap(HashMap::<u64, u64>::new(),10, bh);
+    bench_insert_hashmap(10, bh);
 }
 
 #[bench]
 fn std_hashmap_insert_1000(bh: &mut Bencher) {
-    bench_insert_hashmap(HashMap::<u64, u64>::new(),1000, bh);
+    bench_insert_hashmap(1000, bh);
 }
 
 #[bench]
 fn std_hashmap_insert_100000(bh: &mut Bencher) {
-    bench_insert_hashmap(HashMap::<u64, u64>::new(),100000, bh);
+    bench_insert_hashmap(100000, bh);
 }
 
 #[bench]
 fn std_hashmap_clone_10(bh: &mut Bencher) {
-    bench_clone_hashmap(HashMap::<u64, u64>::new(),10, bh);
+    bench_clone_hashmap(10, bh);
 }
 
 #[bench]
 fn std_hashmap_clone_1000(bh: &mut Bencher) {
-    bench_clone_hashmap(HashMap::<u64, u64>::new(),1000, bh);
+    bench_clone_hashmap(1000, bh);
 }
 
 #[bench]
 fn std_hashmap_clone_100000(bh: &mut Bencher) {
-    bench_clone_hashmap(HashMap::<u64, u64>::new(),100000, bh);
+    bench_clone_hashmap(100000, bh);
 }
 
 
@@ -368,15 +369,15 @@ fn std_hashmap_clone_100000(bh: &mut Bencher) {
 
 #[bench]
 fn std_hashmap_remove_10(bh: &mut Bencher) {
-    bench_remove_hashmap(HashMap::<u64, u64>::new(),10, bh);
+    bench_remove_hashmap(10, bh);
 }
 
 #[bench]
 fn std_hashmap_remove_1000(bh: &mut Bencher) {
-    bench_remove_hashmap(HashMap::<u64, u64>::new(),1000, bh);
+    bench_remove_hashmap(1000, bh);
 }
 
 #[bench]
 fn std_hashmap_remove_10000(bh: &mut Bencher) {
-    bench_remove_hashmap(HashMap::<u64, u64>::new(),10000, bh);
+    bench_remove_hashmap(10000, bh);
 }

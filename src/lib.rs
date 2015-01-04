@@ -27,77 +27,16 @@
 #![feature(unsafe_destructor)]
 #![feature(default_type_params)]
 #![feature(macro_rules)]
+#![feature(associated_types)]
 
 #[cfg(test)]
 extern crate test;
 
-extern crate sync;
-
-pub use hamt::GenericHamtMapIterator;
 pub use hamt::HamtMap;
-pub use hamt::CloningHamtMap;
+pub use hamt::HamtMapIterator;
 
 mod hamt;
 mod item_store;
 
 #[cfg(test)]
 mod testing;
-
-#[cfg(test)]
-mod rbtree;
-
-
-/// A trait to represent persistent maps. Objects implementing this trait are supposed to be
-/// cheaply copyable. Typically they can be seen as a kind of smart pointer with similar performance
-/// characteristics.
-pub trait PersistentMap<K, V>: Map<K, V> + Clone {
-    /// Inserts a key-value pair into the map. An existing value for a
-    /// key is replaced by the new value. The first tuple element of the return value is the new
-    /// map instance representing the map after the insertion. The second tuple element is true if
-    /// the size of the map was changed by the operation and false otherwise.
-    fn insert(self, key: K, value: V) -> (Self, bool);
-
-    /// Removes a key-value pair from the map. The first tuple element of the return value is the new
-    /// map instance representing the map after the insertion. The second tuple element is true if
-    /// the size of the map was changed by the operation and false otherwise.
-    fn remove(self, key: &K) -> (Self, bool);
-
-    /// Inserts a key-value pair into the map. Same as `insert()` but with a return type that's
-    /// better suited to chaining multiple calls together.
-    fn plus(self, key: K, val: V) -> Self {
-        self.insert(key, val).val0()
-    }
-
-    /// Removes a key-value pair from the map. Same as `remove()` but with a return type that's
-    /// better suited to chaining multiple call together
-    fn minus(self, key: &K) -> Self {
-        self.remove(key).val0()
-    }
-}
-
-/// A trait to represent persistent sets. Objects implementing this trait are supposed to be
-/// cheaply copyable. Typically they can be seen as a kind of smart pointer with similar performance
-/// characteristics.
-pub trait PersistentSet<K>: Set<K> + Clone {
-    /// Inserts a value into the set. The first tuple element of the return value is the new
-    /// map instance representing the set after the insertion. The second tuple element is true if
-    /// the size of the map was changed by the operation and false otherwise.
-    fn insert(self, value: K) -> (Self, bool);
-
-    /// Removes a value from the set. The first tuple element of the return value is the new
-    /// map instance representing the map after the insertion. The second tuple element is true if
-    /// the size of the map was changed by the operation and false otherwise.
-    fn remove(self, key: &K) -> (Self, bool);
-
-    /// Inserts a value into the set. Same as `insert()` but with a return type that's
-    /// better suited to chaining multiple calls together.
-    fn plus(self, key: K) -> Self {
-        self.insert(key).val0()
-    }
-
-    /// Removes a value from the set. Same as `remove()` but with a return type that's
-    /// better suited to chaining multiple call together
-    fn minus(self, key: &K) -> Self {
-        self.remove(key).val0()
-    }
-}
