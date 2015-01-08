@@ -25,9 +25,6 @@
 //! example.
 
 #![feature(unsafe_destructor)]
-#![feature(default_type_params)]
-#![feature(macro_rules)]
-#![feature(associated_types)]
 
 #[cfg(test)]
 extern crate test;
