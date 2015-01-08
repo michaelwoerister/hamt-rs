@@ -28,7 +28,7 @@ use std::hash::{Hasher, Hash};
 use std::intrinsics;
 use std::mem;
 use std::ptr;
-use std::sync::atomic::{AtomicUint, Acquire, Release};
+use std::sync::atomic::{AtomicUint, Ordering};
 use std::rt::heap;
 
 use std::sync::Arc;
@@ -71,7 +71,7 @@ impl<K, V, IS, S, H> NodeRef<K, V, IS, H>
 
     fn borrow_mut<'a>(&'a mut self) -> &'a mut UnsafeNode<K, V, IS, H> {
         unsafe {
-            assert!((*self.ptr).ref_count.load(Acquire) == 1);
+            assert!((*self.ptr).ref_count.load(Ordering::Acquire) == 1);
             mem::transmute(self.ptr)
         }
     }
@@ -80,7 +80,7 @@ impl<K, V, IS, S, H> NodeRef<K, V, IS, H>
     // in-place modifications instead of unnecessarily copying data.
     fn try_borrow_owned<'a>(&'a mut self) -> BorrowedNodeRef<'a, K, V, IS, H> {
         unsafe {
-            if (*self.ptr).ref_count.load(Acquire) == 1 {
+            if (*self.ptr).ref_count.load(Ordering::Acquire) == 1 {
                 BorrowedNodeRef::Exclusive(mem::transmute(self.ptr))
             } else {
                 BorrowedNodeRef::Shared(mem::transmute(self.ptr))
@@ -94,7 +94,7 @@ impl<K, V, IS, H> Drop for NodeRef<K, V, IS, H> {
     fn drop(&mut self) {
         unsafe {
             let node: &mut UnsafeNode<K, V, IS, H> = mem::transmute(self.ptr);
-            let old_count = node.ref_count.fetch_sub(1, Acquire);
+            let old_count = node.ref_count.fetch_sub(1, Ordering::Acquire);
             assert!(old_count >= 1);
             if old_count == 1 {
                 node.destroy()
@@ -107,7 +107,7 @@ impl<K, V, IS, H> Clone for NodeRef<K, V, IS, H> {
     fn clone(&self) -> NodeRef<K, V, IS, H> {
         unsafe {
             let node: &mut UnsafeNode<K, V, IS, H> = mem::transmute(self.ptr);
-            let old_count = node.ref_count.fetch_add(1, Release);
+            let old_count = node.ref_count.fetch_add(1, Ordering::Release);
             assert!(old_count >= 1);
         }
 
