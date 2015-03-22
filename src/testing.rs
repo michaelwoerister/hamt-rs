@@ -1,5 +1,5 @@
 
-use std::rand::{Rng, StdRng};
+use rand::{self, Rng};
 use std::collections::HashMap;
 
 use test::Bencher;
@@ -21,15 +21,14 @@ macro_rules! assert_find(
     );
 );
 
-static BENCH_FIND_COUNT: uint = 1000;
-static BENCH_INSERT_COUNT: uint = 1000;
+static BENCH_FIND_COUNT: usize = 1000;
+static BENCH_INSERT_COUNT: usize = 1000;
 
 pub struct Test;
 
-impl<IS> Test
-    where IS: ItemStore<u64, u64> {
+impl Test {
 
-    pub fn test_insert(empty: HamtMap<u64, u64, IS>) {
+    pub fn test_insert<IS: ItemStore<u64, u64>>(empty: HamtMap<u64, u64, IS>) {
         let map00 = empty;
         let (map01, new_entry01) = map00.clone().insert(1, 2);
         let (map10, new_entry10) = map00.clone().insert(2, 4);
@@ -57,28 +56,28 @@ impl<IS> Test
         assert_eq!(map11.len(), 2);
     }
 
-    pub fn test_insert_ascending(empty: HamtMap<u64, u64, IS>) {
+    pub fn test_insert_ascending<IS: ItemStore<u64, u64>> (empty: HamtMap<u64, u64, IS>) {
         let mut map = empty;
 
-        for x in range(0u64, 1000u64) {
-            assert_eq!(map.len(), x as uint);
+        for x in (0u64 .. 1000) {
+            assert_eq!(map.len(), x as usize);
             map = map.insert(x, x).0;
             assert_find!(map, x, x);
         }
     }
 
-    pub fn test_insert_descending(empty: HamtMap<u64, u64, IS>) {
+    pub fn test_insert_descending<IS: ItemStore<u64, u64>> (empty: HamtMap<u64, u64, IS>) {
         let mut map = empty;
 
-        for x in range(0u64, 1000u64) {
+        for x in (0u64 .. 1000) {
             let key = 999u64 - x;
-            assert_eq!(map.len(), x as uint);
+            assert_eq!(map.len(), x as usize);
             map = map.insert(key, x).0;
             assert_find!(map, key, x);
         }
     }
 
-    pub fn test_insert_overwrite(empty: HamtMap<u64, u64, IS>) {
+    pub fn test_insert_overwrite<IS: ItemStore<u64, u64>> (empty: HamtMap<u64, u64, IS>) {
         let (map1, new_entry1) = empty.clone().insert(1, 2);
         let (map2, new_entry2) = map1.clone().insert(1, 4);
         let (map3, new_entry3) = map2.clone().insert(1, 6);
@@ -98,7 +97,7 @@ impl<IS> Test
         assert_eq!(map3.len(), 1);
     }
 
-    pub fn test_remove(empty: HamtMap<u64, u64, IS>) {
+    pub fn test_remove<IS: ItemStore<u64, u64>> (empty: HamtMap<u64, u64, IS>) {
         let (map00, _) = (empty
             .insert(1, 2)).0
             .insert(2, 4);
@@ -125,13 +124,13 @@ impl<IS> Test
         assert_eq!(map11.len(), 0);
     }
 
-    pub fn random_insert_remove_stress_test(empty: HamtMap<u64, u64, IS>) {
+    pub fn random_insert_remove_stress_test<IS: ItemStore<u64, u64>> (empty: HamtMap<u64, u64, IS>) {
         let mut reference: HashMap<u64, u64> = HashMap::new();
-        let mut rng = StdRng::new().ok().expect("Could not create random number generator");
+        let mut rng = rand::thread_rng();
 
         let mut map = empty;
 
-        for _ in range(0u, 500000) {
+        for _ in 0 .. 5000000usize {
             let value: u64 = rng.gen();
 
             if rng.gen_weighted_bool(2) {
@@ -155,9 +154,9 @@ impl<IS> Test
     }
 }
 
-fn create_random_std_hashmap(count: uint) -> HashMap<u64, u64> {
+fn create_random_std_hashmap(count: usize) -> HashMap<u64, u64> {
     let mut hashmap = HashMap::<u64, u64>::new();
-    let mut rng = StdRng::new().ok().expect("Could not create random number generator");
+    let mut rng = rand::thread_rng();
 
     while hashmap.len() < count {
         let value = rng.gen();
@@ -168,16 +167,15 @@ fn create_random_std_hashmap(count: uint) -> HashMap<u64, u64> {
 }
 
 
-fn create_unique_values(count: uint) -> Vec<u64> {
+fn create_unique_values(count: usize) -> Vec<u64> {
     create_random_std_hashmap(count).keys().map(|x| *x).collect()
 }
 
 pub static mut results: [Option<u64>; 1000000] = [None; 1000000];
 
-impl<IS> Test
-    where IS: ItemStore<u64, u64> {
+impl Test {
 
-    fn create_random_map(empty: HamtMap<u64, u64, IS>, count: uint) -> (HamtMap<u64, u64, IS>, Vec<u64>) {
+    fn create_random_map<IS: ItemStore<u64, u64>>(empty: HamtMap<u64, u64, IS>, count: usize) -> (HamtMap<u64, u64, IS>, Vec<u64>) {
         let keys = create_unique_values(count);
         let mut map = empty;
 
@@ -188,11 +186,11 @@ impl<IS> Test
         return (map, keys);
     }
 
-    pub fn bench_find(empty: HamtMap<u64, u64, IS>, count: uint, bh: &mut Bencher) {
+    pub fn bench_find<IS: ItemStore<u64, u64>>(empty: HamtMap<u64, u64, IS>, count: usize, bh: &mut Bencher) {
         let (map, keys) = Test::create_random_map(empty, count);
 
         bh.iter(|| {
-            for i in range(0u, BENCH_FIND_COUNT) {
+            for i in (0usize .. BENCH_FIND_COUNT) {
                 let val = keys[i % count];
                 // lets make about of half the lookups fail
                 let val = val + (i as u64 & 1);
@@ -207,33 +205,33 @@ impl<IS> Test
         })
     }
 
-    pub fn bench_insert(empty: HamtMap<u64, u64, IS>, count: uint, bh: &mut Bencher) {
+    pub fn bench_insert<IS: ItemStore<u64, u64>>(empty: HamtMap<u64, u64, IS>, count: usize, bh: &mut Bencher) {
         let (map, keys) = Test::create_random_map(empty, count + BENCH_INSERT_COUNT);
 
         bh.iter(|| {
             let mut map1 = map.clone();
 
-            for i in range(0u, BENCH_INSERT_COUNT) {
+            for i in (0usize .. BENCH_INSERT_COUNT) {
                 let val = keys[count + i];
                 map1 = map1.plus(val, val);
             }
         })
     }
 
-    pub fn bench_remove(empty: HamtMap<u64, u64, IS>, count: uint, bh: &mut Bencher) {
+    pub fn bench_remove<IS: ItemStore<u64, u64>>(empty: HamtMap<u64, u64, IS>, count: usize, bh: &mut Bencher) {
         let (map, keys) = Test::create_random_map(empty, count);
 
         bh.iter(|| {
             let mut map = map.clone();
 
-            for x in ::std::iter::range_step(0, count as uint, 2) {
+            for x in (0 .. count as usize).step_by(2) {
                 map = map.minus(&keys[x]);
             }
         })
     }
 }
 
-fn bench_find_hashmap(count: uint, bh: &mut Bencher) {
+fn bench_find_hashmap(count: usize, bh: &mut Bencher) {
     let values = create_unique_values(count);
     let mut map = HashMap::new();
 
@@ -242,7 +240,7 @@ fn bench_find_hashmap(count: uint, bh: &mut Bencher) {
     }
 
     bh.iter(|| {
-        for i in range(0u, BENCH_FIND_COUNT) {
+        for i in (0usize .. BENCH_FIND_COUNT) {
             let val = values[i % count];
 
             unsafe {
@@ -255,7 +253,7 @@ fn bench_find_hashmap(count: uint, bh: &mut Bencher) {
     })
 }
 
-fn bench_insert_hashmap(count: uint, bh: &mut Bencher) {
+fn bench_insert_hashmap(count: usize, bh: &mut Bencher) {
     let values = create_unique_values(count + BENCH_INSERT_COUNT);
     let mut map = HashMap::new();
 
@@ -266,14 +264,14 @@ fn bench_insert_hashmap(count: uint, bh: &mut Bencher) {
     bh.iter(|| {
         let mut map1 = map.clone();
 
-        for i in range(0u, BENCH_INSERT_COUNT) {
+        for i in (0usize .. BENCH_INSERT_COUNT) {
             let val = values[count + i];
             map1.insert(val, val);
         }
     })
 }
 
-fn bench_clone_hashmap(count: uint, bh: &mut Bencher) {
+fn bench_clone_hashmap(count: usize, bh: &mut Bencher) {
     let values = create_unique_values(count);
     let mut map = HashMap::new();
 
@@ -286,7 +284,7 @@ fn bench_clone_hashmap(count: uint, bh: &mut Bencher) {
     })
 }
 
-fn bench_remove_hashmap(count: uint, bh: &mut Bencher) {
+fn bench_remove_hashmap(count: usize, bh: &mut Bencher) {
     let values = create_unique_values(count);
     let mut map = HashMap::new();
 
@@ -297,7 +295,7 @@ fn bench_remove_hashmap(count: uint, bh: &mut Bencher) {
     bh.iter(|| {
         let mut map1 = map.clone();
 
-        for x in ::std::iter::range_step(0, count, 2) {
+        for x in (0..count).step_by(2) {
             map1.remove(&values[x]);
         }
     })

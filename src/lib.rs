@@ -25,12 +25,20 @@
 //! example.
 
 #![feature(unsafe_destructor)]
-#![feature(default_type_params)]
-#![feature(macro_rules)]
-#![feature(associated_types)]
+#![feature(core)]
+#![feature(alloc)]
+#![feature(collections)]
+#![feature(hash)]
+#![feature(step_by)]
+
+#![feature(test)]
+
 
 #[cfg(test)]
 extern crate test;
+
+
+extern crate rand;
 
 pub use hamt::HamtMap;
 pub use hamt::HamtMapIterator;
