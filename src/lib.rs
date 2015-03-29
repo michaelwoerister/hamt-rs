@@ -27,12 +27,10 @@
 #![feature(unsafe_destructor)]
 #![feature(core)]
 #![feature(alloc)]
-#![feature(collections)]
 #![feature(hash)]
-#![feature(step_by)]
 
-#![feature(test)]
-
+#![cfg_attr(test, feature(test))]
+#![cfg_attr(test, feature(step_by))]
 
 #[cfg(test)]
 extern crate test;

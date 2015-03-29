@@ -483,7 +483,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
 
                         let mut new_items = Vec::with_capacity(items.len() + 1);
                         new_items.push(new_kvp);
-                        new_items.push_all(&items);
+                        new_items.extend(items.iter().cloned());
                         new_items
                     }
                     Some(position) => {
@@ -493,13 +493,13 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
                         let mut new_items = Vec::with_capacity(item_count);
 
                         if position > 0 {
-                            new_items.push_all(&items[..position]);
+                            new_items.extend(items.iter().take(position).cloned());
                         }
 
                         new_items.push(new_kvp);
 
                         if position < item_count - 1 {
-                           new_items.push_all(&items[position + 1..]);
+                           new_items.extend(items.iter().skip(position + 1).cloned());
                         }
 
                         debug_assert!(new_items.len() == item_count);
@@ -602,7 +602,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
 
                         let mut new_items = Vec::with_capacity(items.len() + 1);
                         new_items.push(new_kvp);
-                        new_items.push_all(&items);
+                        new_items.extend(items.iter().cloned());
                         new_items
                     }
                     Some(position) => {
@@ -612,13 +612,13 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
                         let mut new_items = Vec::with_capacity(item_count);
 
                         if position > 0 {
-                            new_items.push_all(&items[..position]);
+                            new_items.extend(items.iter().take(position).cloned());
                         }
 
                         new_items.push(new_kvp);
 
                         if position < item_count - 1 {
-                           new_items.push_all(&items[position + 1 ..]);
+                           new_items.extend(items.iter().skip(position + 1).cloned());
                         }
 
                         debug_assert!(new_items.len() == item_count);
@@ -710,10 +710,10 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
                             let mut new_items = Vec::with_capacity(item_count);
 
                             if position > 0 {
-                                new_items.push_all(&items[..position]);
+                                new_items.extend(items.iter().take(position).cloned());
                             }
                             if position < item_count - 1 {
-                                new_items.push_all(&items[position + 1 ..]);
+                                new_items.extend(items.iter().skip(position + 1).cloned());
                             }
                             debug_assert!(new_items.len() == item_count);
 
@@ -816,10 +816,10 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
                             let mut new_items = Vec::with_capacity(item_count);
 
                             if position > 0 {
-                                new_items.push_all(&items[..position]);
+                                new_items.extend(items.iter().take(position).cloned());
                             }
                             if position < item_count - 1 {
-                                new_items.push_all(&items[position + 1 ..]);
+                                new_items.extend(items.iter().skip(position + 1).cloned());
                             }
                             debug_assert!(new_items.len() == item_count);
 
