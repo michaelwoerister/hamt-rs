@@ -89,7 +89,6 @@ impl<K, V, IS, H> NodeRef<K, V, IS, H>
     }
 }
 
-//#[unsafe_destructor]
 impl<K, V, IS, H> Drop for NodeRef<K, V, IS, H> {
     fn drop(&mut self) {
         unsafe {
