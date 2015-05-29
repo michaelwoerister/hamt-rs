@@ -89,7 +89,6 @@ impl<K, V, IS, H> NodeRef<K, V, IS, H>
     }
 }
 
-#[unsafe_destructor]
 impl<K, V, IS, H> Drop for NodeRef<K, V, IS, H> {
     fn drop(&mut self) {
         unsafe {
@@ -1002,7 +1001,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
                         source.offset(UnsafeNode::<K, V, IS, H>::node_entry_size() as isize));
                     let count = (self.entry_count() - index) *
                         UnsafeNode::<K, V, IS, H>::node_entry_size();
-                    ptr::copy(dest, source, count);
+                    ptr::copy(source, dest, count);
 
                     let type_mask_up_to_index: u64 = 0xFFFFFFFFFFFFFFFFu64 << ((index + 1) * 2);
                     self.entry_types = ((self.entry_types << 2) & type_mask_up_to_index) |
@@ -1077,7 +1076,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
                     );
                 let count = (self.entry_count() - (index + 1)) *
                     UnsafeNode::<K, V, IS, H>::node_entry_size();
-                ptr::copy(dest, source, count);
+                ptr::copy(source, dest, count);
 
                 let type_mask_up_to_index: u64 = 0xFFFFFFFFFFFFFFFFu64 << ((index + 1) * 2);
                 self.entry_types = ((self.entry_types & type_mask_up_to_index) >> 2) |
@@ -1167,7 +1166,10 @@ impl<K, V, IS, H> HamtMap<K, V, IS, H>
         }
     }
 
-    pub fn iter<'a>(&'a self) -> HamtMapIterator<'a, K, V, IS, H> {
+    pub fn iter<'a>(&'a self) -> HamtMapIterator<'a, K, V, IS, H>
+        where K:Clone,
+              V:Clone,
+              H:Clone {
         HamtMapIterator::new(self)
     }
 
@@ -1336,6 +1338,7 @@ impl<K, V, IS, H> Clone for HamtMap<K, V, IS, H> {
 // HamtMapIterator
 //=-------------------------------------------------------------------------------------------------
 
+#[derive(Clone)]
 enum IterNodeRef<'a, K, V, IS, H>
     where K: 'a,
           V: 'a,
@@ -1346,13 +1349,13 @@ enum IterNodeRef<'a, K, V, IS, H>
     CollisionEntry(&'a Vec<IS>)
 }
 
-impl<'a, K, V, IS, H> Copy for IterNodeRef<'a, K, V, IS, H> {}
+impl<'a, K:Clone+'a, V:Clone+'a, IS:Clone+'a, H:Clone+'a> Copy for IterNodeRef<'a, K, V, IS, H> {}
 
 pub struct HamtMapIterator<'a, K, V, IS, H>
-    where K: 'a,
-          V: 'a,
-          IS: 'a,
-          H: 'a
+    where K: 'a+Clone,
+          V: 'a+Clone,
+          IS: 'a+Clone,
+          H: 'a+Clone
 {
     node_stack: [(IterNodeRef<'a, K, V, IS, H>, isize); LAST_LEVEL + 2],
     stack_size: usize,
@@ -1361,10 +1364,10 @@ pub struct HamtMapIterator<'a, K, V, IS, H>
 
 impl<'a, K, V, IS, H>
 HamtMapIterator<'a, K, V, IS, H>
-    where K: Eq+Send+Sync,
-          V: Send+Sync,
+    where K: Eq+Send+Sync+Clone,
+          V: Send+Sync+Clone,
           IS: ItemStore<K, V>,
-          H: Hasher
+          H: Hasher+Clone
 {
     fn new(map: &'a HamtMap<K, V, IS, H>) -> HamtMapIterator<'a, K, V, IS, H> {
         let mut iterator = HamtMapIterator {
@@ -1380,10 +1383,10 @@ HamtMapIterator<'a, K, V, IS, H>
 
 impl<'a, K, V, IS, H>
 Iterator for HamtMapIterator<'a, K, V, IS, H>
-    where K: Eq+Send+Sync,
-          V: Send+Sync,
+    where K: Eq+Send+Sync+Clone,
+          V: Send+Sync+Clone,
           IS: ItemStore<K, V>,
-          H: 'a + Hasher
+          H: 'a + Hasher+Clone
 {
     type Item = (&'a K, &'a V);
 
@@ -1401,8 +1404,7 @@ Iterator for HamtMapIterator<'a, K, V, IS, H>
                     self.stack_size -= 1;
                     return self.next();
                 } else {
-                    let (_, ref mut stack_index) = self.node_stack[self.stack_size - 1];
-                    *stack_index = next_index as isize;
+                    self.node_stack[self.stack_size - 1].1 = next_index as isize; 
                 }
 
                 match node_ref.get_entry(next_index) {
@@ -1519,7 +1521,6 @@ fn get_index(mask: u32, index: usize) -> usize {
 
 #[inline]
 fn bit_count(x: u32) -> usize {
-    use std::num::Int;
     x.count_ones() as usize
 }
 
