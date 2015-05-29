@@ -1521,7 +1521,6 @@ fn get_index(mask: u32, index: usize) -> usize {
 
 #[inline]
 fn bit_count(x: u32) -> usize {
-//    use std::num::Int;
     x.count_ones() as usize
 }
 
