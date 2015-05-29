@@ -24,7 +24,6 @@
 //! information see [Wikipedia](https://en.wikipedia.org/wiki/Persistent_data_structure) for
 //! example.
 
-#![feature(unsafe_destructor)]
 #![feature(core)]
 #![feature(alloc)]
 #![feature(hash)]
