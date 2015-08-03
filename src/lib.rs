@@ -24,10 +24,9 @@
 //! information see [Wikipedia](https://en.wikipedia.org/wiki/Persistent_data_structure) for
 //! example.
 
-#![feature(unsafe_destructor)]
-#![feature(core)]
-#![feature(alloc)]
-#![feature(hash)]
+#![feature(core_intrinsics)]
+#![feature(heap_api)]
+#![feature(hash_default)]
 
 #![cfg_attr(test, feature(test))]
 #![cfg_attr(test, feature(step_by))]
