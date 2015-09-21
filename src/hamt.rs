@@ -24,12 +24,12 @@
 //! The idea to use a special *collision node* to deal with hash collisions is taken from Clojure's
 //! implementation.
 
-use std::hash::{self, Hasher, Hash};
+use std::hash::{Hasher, Hash};
 use std::intrinsics;
 use std::mem;
 use std::ptr;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::rt::heap;
+use alloc::heap;
 use std::default::Default;
 
 use std::sync::Arc;
@@ -451,7 +451,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
 
                     // 1. build the hashes for the level below
                     let new_hash = hash >> BITS_PER_LEVEL;
-                    let existing_hash = hash::hash::<K, H>(&existing_key) >> (BITS_PER_LEVEL * (level + 1));
+                    let existing_hash = hash_of::<K, H>(&existing_key) >> (BITS_PER_LEVEL * (level + 1));
 
                     // 2. create the sub tree, containing the two items
                     let new_sub_tree = UnsafeNode::new_with_entries(new_kvp,
@@ -571,7 +571,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
 
                     // 1. build the hashes for the level below
                     let new_hash = hash >> BITS_PER_LEVEL;
-                    let existing_hash = hash::hash::<K, H>(existing_key) >> (BITS_PER_LEVEL * (level + 1));
+                    let existing_hash = hash_of::<K, H>(existing_key) >> (BITS_PER_LEVEL * (level + 1));
 
                     // 2. create the sub tree, containing the two items
                     let new_sub_tree = UnsafeNode::new_with_entries(new_kvp,
@@ -1172,7 +1172,7 @@ impl<K, V, IS, H> HamtMap<K, V, IS, H>
 
     pub fn find<'a>(&'a self, key: &K) -> Option<&'a V> {
         // let mut hash = key.hash();
-        let mut hash = hash::hash::<K,H>(key);
+        let mut hash = hash_of::<K, H>(key);
 
         let mut level = 0;
         let mut current_node = self.root.borrow();
@@ -1213,7 +1213,7 @@ impl<K, V, IS, H> HamtMap<K, V, IS, H>
 
     fn insert_internal(self, kvp: IS) -> (HamtMap<K, V, IS, H>, bool) {
         let HamtMap { mut root, element_count } = self;
-        let hash = hash::hash::<K,H>(kvp.key());
+        let hash = hash_of::<K, H>(kvp.key());
         let mut insertion_count = 0xdeadbeaf;
 
         // If we hold the only reference to the root node, then try to insert the KVP in-place
@@ -1245,7 +1245,7 @@ impl<K, V, IS, H> HamtMap<K, V, IS, H>
 
     fn try_remove_in_place(self, key: &K) -> (HamtMap<K, V, IS, H>, bool) {
         let HamtMap { mut root, element_count } = self;
-        let hash = hash::hash::<K,H>(key);
+        let hash = hash_of::<K, H>(key);
         let mut removal_count = 0xdeadbeaf;
 
         let removal_result = match root.try_borrow_owned() {
@@ -1266,7 +1266,7 @@ impl<K, V, IS, H> HamtMap<K, V, IS, H>
             },
             RemovalResult::CollapseSubTree(kvp) => {
                 debug_assert!(bit_count(root.borrow().mask) == 2);
-                let local_key = (hash::hash::<K,H>(kvp.key()) & LEVEL_BIT_MASK) as usize;
+                let local_key = (hash_of::<K, H>(kvp.key()) & LEVEL_BIT_MASK) as usize;
 
                 let mask = 1 << local_key;
                 let mut new_root_ref = UnsafeNode::alloc(mask, MIN_CAPACITY);
@@ -1329,6 +1329,95 @@ impl<K, V, IS, H> Clone for HamtMap<K, V, IS, H> {
     }
 }
 
+// Default for HamtMap
+impl<K, V, IS, H> Default for HamtMap<K, V, IS, H>
+    where K: Eq+Send+Sync+Hash,
+          V: Send+Sync,
+          IS: ItemStore<K, V>,
+          H: Hasher+Default
+{
+    fn default() -> HamtMap<K, V, IS, H> {
+        HamtMap::new()
+    }
+}
+
+impl<'a, K, V, IS, H> IntoIterator for &'a HamtMap<K, V, IS, H>
+    where K: Eq+Send+Sync+Hash+'a,
+          V: Send+Sync+'a,
+          IS: ItemStore<K, V>+'a,
+          H: Hasher+Default+'a
+{
+    type Item = (&'a K, &'a V);
+    type IntoIter = HamtMapIterator<'a, K, V, IS, H>;
+
+    fn into_iter(self) -> HamtMapIterator<'a, K, V, IS, H>
+    {
+        self.iter()
+    }
+}
+
+// Eq for HamtMap
+impl<K, V, IS, H> PartialEq for HamtMap<K, V, IS, H>
+    where K: Eq+Send+Sync+Hash,
+          V: PartialEq+Send+Sync,
+          IS: ItemStore<K, V>,
+          H: Hasher+Default
+{
+    fn eq(&self, other: &HamtMap<K, V, IS, H>) -> bool {
+        if self.len() != other.len() {
+            return false;
+        }
+
+        for (k, other_value) in other.iter() {
+            match self.find(k) {
+                Some(this_value) => {
+                    if *this_value != *other_value {
+                        return false;
+                    }
+                }
+                None => {
+                    return false;
+                }
+            }
+        }
+
+        true
+    }
+
+    fn ne(&self, other: &HamtMap<K, V, IS, H>) -> bool {
+        !(*self == *other)
+    }
+}
+
+
+// Eq for HamtMap
+impl<K, V, IS, H> Eq for HamtMap<K, V, IS, H>
+    where K: Eq+Send+Sync+Hash,
+          V: Eq+Send+Sync,
+          IS: ItemStore<K, V>,
+          H: Hasher+Default
+{
+}
+
+
+// FromIterator
+impl<K, V, IS, H> ::std::iter::FromIterator<(K, V)> for HamtMap<K, V, IS, H> 
+    where K: Eq+Send+Sync+Hash,
+          V: Send+Sync,
+          IS: ItemStore<K, V>,
+          H: Hasher+Default
+{
+    fn from_iter<T>(iterator: T) -> Self where T: IntoIterator<Item=(K, V)> {
+
+        let mut map = HamtMap::new();
+
+        for (k, v) in iterator {
+            map = map.plus(k, v);
+        }
+
+        map
+    }
+}
 
 
 //=-------------------------------------------------------------------------------------------------
@@ -1452,71 +1541,6 @@ Iterator for HamtMapIterator<'a, K, V, IS, H>
     }
 }
 
-
-
-//=-------------------------------------------------------------------------------------------------
-// HamtSet
-//=-------------------------------------------------------------------------------------------------
-// struct HamtSet<V, H> {
-//     data: HamtMap<V, (), ShareStore<V, ()>, H>
-// }
-
-// impl<V, S, H>
-// HamtSet<V, H>
-//     where V: Send+Sync+Eq+Hash<S>,
-//           H: Hasher<S>+Clone
-// {
-//     pub fn contains(&self, value: &V) -> bool {
-//         self.data.find(value).is_some()
-//     }
-
-//     pub fn is_disjoint(&self, other: &HamtSet<V, H>) -> bool {
-//         for (v, _) in self.data.iter() {
-//             if other.contains(v) {
-//                 return false;
-//             }
-//         }
-
-//         return true;
-//     }
-
-//     pub fn is_subset(&self, other: &HamtSet<V, H>) -> bool {
-//         if self.len() > other.len() {
-//             return false;
-//         }
-
-//         for (v, _) in self.data.iter() {
-//             if !other.contains(v) {
-//                 return false;
-//             }
-//         }
-
-//         return true;
-//     }
-
-//     pub fn is_superset(&self, other: &HamtSet<V, H>) -> bool {
-//         other.is_subset(self)
-//     }
-
-//     pub fn len(&self) -> uint {
-//         self.data.len()
-//     }
-// }
-
-// // Clone for HamtSet
-// impl<V, S, H>
-// Clone for HamtSet<V, H>
-//     where V: Eq+Send+Sync,
-//           H: Hasher<S>+Clone
-// {
-//     fn clone(&self) -> HamtSet<V, H> {
-//         HamtSet {
-//             data: self.data.clone()
-//         }
-//     }
-// }
-
-
 //=-------------------------------------------------------------------------------------------------
 // Utility functions
 //=------------------------------------------------------------------------------------------------
@@ -1538,6 +1562,12 @@ fn bit_count(x: u32) -> usize {
 fn align_to(size: usize, align: usize) -> usize {
     debug_assert!(align != 0 && bit_count(align as u32) == 1);
     (size + align - 1) & !(align - 1)
+}
+
+fn hash_of<T: Hash, H: Hasher + Default>(value: &T) -> u64 {
+    let mut h: H = Default::default();
+    value.hash(&mut h);
+    h.finish()
 }
 
 #[cfg(test)]
@@ -1611,6 +1641,21 @@ mod tests {
     #[test]
     fn test_remove_copy() {
         Test::test_remove(HamtMap::<u64, u64, CopyStore>::new());
+    }
+
+    #[test]
+    fn test_default_copy() {
+        Test::test_default::<CopyStore>();
+    }
+
+    #[test]
+    fn test_eq_empty_copy() {
+        Test::test_eq_empty::<CopyStore>();
+    }
+
+    #[test]
+    fn test_eq_random_copy() {
+        Test::test_eq_random::<CopyStore>();
     }
 
     #[test]

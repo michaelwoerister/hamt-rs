@@ -6,6 +6,7 @@ use test::Bencher;
 
 use item_store::ItemStore;
 use hamt::HamtMap;
+use std::iter::FromIterator;
 
 macro_rules! assert_find(
     ($map:ident, $key:expr, None) => (
@@ -55,7 +56,7 @@ impl Test {
         assert_eq!(map10.len(), 1);
         assert_eq!(map11.len(), 2);
     }
-
+    
     pub fn test_insert_ascending<IS: ItemStore<u64, u64>> (empty: HamtMap<u64, u64, IS>) {
         let mut map = empty;
 
@@ -122,6 +123,56 @@ impl Test {
         assert_eq!(map01.len(), 1);
         assert_eq!(map10.len(), 1);
         assert_eq!(map11.len(), 0);
+    }
+
+    pub fn test_default<IS: ItemStore<u64, u64>>() {
+        let default = HamtMap::<u64, u64, IS>::default();
+        assert_eq!(default.len(), 0);
+    }
+
+    pub fn test_eq_empty<IS: ItemStore<u64, u64>>() {
+        assert!(HamtMap::<u64, u64, IS>::new() == HamtMap::<u64, u64, IS>::new());
+    }
+
+    pub fn test_eq_random<IS: ItemStore<u64, u64>>() {
+        let TEST_ITERATIONS = 10;
+
+        let mut rng = rand::thread_rng();
+        let mut data = Vec::from_iter(rng.gen_iter::<u64>().take(1000));
+
+        let reference = HamtMap::<_, _, IS>::from_iter(data.iter().map(|&x| (x, x)));
+
+        for _ in 0..TEST_ITERATIONS {
+            rng.shuffle(&mut data[..]);
+            let randomized = HamtMap::<_, _, IS>::from_iter(data.iter().map(|&x| (x, x)));
+            assert!(reference == randomized);
+        }
+
+        for _ in 0..TEST_ITERATIONS {
+            rng.shuffle(&mut data[..]);
+            let mut randomized = HamtMap::<_, _, IS>::from_iter(data.iter().map(|&x| (x, x)));
+
+            loop {
+                let index1 = rng.gen_range(0, data.len());
+                let index2 = rng.gen_range(0, data.len());
+
+                if data[index1] != data[index2] {
+                    randomized = randomized.plus(data[index1], data[index2]);
+                    break;
+                }
+            }
+                               
+            assert!(reference != randomized);
+        }
+
+        for _ in 0..TEST_ITERATIONS {
+            rng.shuffle(&mut data[..]);
+            // Remove one item...
+            let randomized = HamtMap::<_, _, IS>::from_iter(data.iter().map(|&x| (x, x)))
+                             .minus(&data[data.len()/7]);
+            // ... and make sure that it makes a difference
+            assert!(reference != randomized);
+        }
     }
 
     pub fn random_insert_remove_stress_test<IS: ItemStore<u64, u64>> (empty: HamtMap<u64, u64, IS>) {

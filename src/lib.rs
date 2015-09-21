@@ -25,17 +25,16 @@
 //! example.
 
 #![feature(core_intrinsics)]
+#![feature(alloc)]
 #![feature(heap_api)]
-#![feature(hash_default)]
-
 #![cfg_attr(test, feature(test))]
 #![cfg_attr(test, feature(step_by))]
 
+extern crate alloc;
+extern crate rand;
+
 #[cfg(test)]
 extern crate test;
-
-
-extern crate rand;
 
 pub use hamt::HamtMap;
 pub use hamt::HamtMapIterator;
