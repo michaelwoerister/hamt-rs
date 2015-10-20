@@ -21,4 +21,4 @@ rustc -C lto \
       --extern rand=$RAND_LIB \
       ./src/lib.rs
 
-./benchmark/hamt-bench --bench
+./benchmark/hamt-bench --bench | python ./gen-perf-tables.py
