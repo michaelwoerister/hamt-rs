@@ -29,6 +29,7 @@
 #![feature(heap_api)]
 #![cfg_attr(test, feature(test))]
 #![cfg_attr(test, feature(step_by))]
+#![allow(unused_parens)]
 
 extern crate alloc;
 extern crate rand;

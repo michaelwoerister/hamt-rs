@@ -56,7 +56,7 @@ impl Test {
         assert_eq!(map10.len(), 1);
         assert_eq!(map11.len(), 2);
     }
-    
+
     pub fn test_insert_ascending<IS: ItemStore<u64, u64>> (empty: HamtMap<u64, u64, IS>) {
         let mut map = empty;
 
@@ -135,20 +135,20 @@ impl Test {
     }
 
     pub fn test_eq_random<IS: ItemStore<u64, u64>>() {
-        let TEST_ITERATIONS = 10;
+        let test_iterations = 10;
 
         let mut rng = rand::thread_rng();
         let mut data = Vec::from_iter(rng.gen_iter::<u64>().take(1000));
 
         let reference = HamtMap::<_, _, IS>::from_iter(data.iter().map(|&x| (x, x)));
 
-        for _ in 0..TEST_ITERATIONS {
+        for _ in 0..test_iterations {
             rng.shuffle(&mut data[..]);
             let randomized = HamtMap::<_, _, IS>::from_iter(data.iter().map(|&x| (x, x)));
             assert!(reference == randomized);
         }
 
-        for _ in 0..TEST_ITERATIONS {
+        for _ in 0..test_iterations {
             rng.shuffle(&mut data[..]);
             let mut randomized = HamtMap::<_, _, IS>::from_iter(data.iter().map(|&x| (x, x)));
 
@@ -161,11 +161,11 @@ impl Test {
                     break;
                 }
             }
-                               
+
             assert!(reference != randomized);
         }
 
-        for _ in 0..TEST_ITERATIONS {
+        for _ in 0..test_iterations {
             rng.shuffle(&mut data[..]);
             // Remove one item...
             let randomized = HamtMap::<_, _, IS>::from_iter(data.iter().map(|&x| (x, x)))
