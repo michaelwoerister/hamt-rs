@@ -24,7 +24,6 @@
 //! information see [Wikipedia](https://en.wikipedia.org/wiki/Persistent_data_structure) for
 //! example.
 
-#![feature(core_intrinsics)]
 #![feature(alloc)]
 #![feature(heap_api)]
 #![cfg_attr(test, feature(test))]

@@ -25,7 +25,6 @@
 //! implementation.
 
 use std::hash::{Hasher, Hash};
-use std::intrinsics;
 use std::mem;
 use std::ptr;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -299,15 +298,15 @@ impl<'a, K, V, IS, H> UnsafeNode<K, V, IS, H>
         unsafe {
             match entry {
                 NodeEntryOwned::Item(kvp) => {
-                    intrinsics::move_val_init(mem::transmute(entry_ptr), kvp);
+                    ptr::write(mem::transmute(entry_ptr), kvp);
                     self.set_entry_type_code(index, KVP_ENTRY);
                 }
                 NodeEntryOwned::SubTree(node_ref) => {
-                    intrinsics::move_val_init(mem::transmute(entry_ptr), node_ref);
+                    ptr::write(mem::transmute(entry_ptr), node_ref);
                     self.set_entry_type_code(index, SUBTREE_ENTRY);
                 }
                 NodeEntryOwned::Collision(arc) => {
-                    intrinsics::move_val_init(mem::transmute(entry_ptr), arc);
+                    ptr::write(mem::transmute(entry_ptr), arc);
                     self.set_entry_type_code(index, COLLISION_ENTRY);
                 }
             }
@@ -357,10 +356,10 @@ impl<'a, K, V, IS, H> UnsafeNode<K, V, IS, H>
 
         unsafe {
             let node_ptr: *mut UnsafeNode<K, V, IS, H> = mem::transmute(heap::allocate(node_size, align));
-            intrinsics::move_val_init(&mut (*node_ptr).ref_count, AtomicUsize::new(1));
-            intrinsics::move_val_init(&mut (*node_ptr).entry_types, 0);
-            intrinsics::move_val_init(&mut (*node_ptr).mask, mask);
-            intrinsics::move_val_init(&mut (*node_ptr).capacity, capacity as u8);
+            ptr::write(&mut (*node_ptr).ref_count, AtomicUsize::new(1));
+            ptr::write(&mut (*node_ptr).entry_types, 0);
+            ptr::write(&mut (*node_ptr).mask, mask);
+            ptr::write(&mut (*node_ptr).capacity, capacity as u8);
             NodeRef { ptr: node_ptr }
         }
     }
@@ -1401,7 +1400,7 @@ impl<K, V, IS, H> Eq for HamtMap<K, V, IS, H>
 
 
 // FromIterator
-impl<K, V, IS, H> ::std::iter::FromIterator<(K, V)> for HamtMap<K, V, IS, H> 
+impl<K, V, IS, H> ::std::iter::FromIterator<(K, V)> for HamtMap<K, V, IS, H>
     where K: Eq+Send+Sync+Hash,
           V: Send+Sync,
           IS: ItemStore<K, V>,
@@ -1469,7 +1468,7 @@ HamtMapIterator<'a, K, V, IS, H>
 {
     fn new(map: &'a HamtMap<K, V, IS, H>) -> HamtMapIterator<'a, K, V, IS, H> {
         let mut iterator = HamtMapIterator {
-            node_stack: unsafe{ intrinsics::uninit() },
+            node_stack: unsafe{ mem::zeroed() },
             stack_size: 1,
             len: map.element_count,
         };
