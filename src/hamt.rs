@@ -28,12 +28,12 @@ use std::hash::{Hasher, Hash};
 use std::mem;
 use std::ptr;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use alloc::heap;
 use std::default::Default;
 
 use std::sync::Arc;
 use item_store::{ItemStore, ShareStore};
 
+use libc;
 
 //=-------------------------------------------------------------------------------------------------
 // NodeRef
@@ -355,7 +355,10 @@ impl<'a, K, V, IS, H> UnsafeNode<K, V, IS, H>
         let node_size = header_size + capacity * UnsafeNode::<K, V, IS, H>::node_entry_size();
 
         unsafe {
-            let node_ptr: *mut UnsafeNode<K, V, IS, H> = mem::transmute(heap::allocate(node_size, align));
+            // Let's use malloc and free for raw memory allocation so this library
+            // build on 'stable':
+            // let node_ptr: *mut UnsafeNode<K, V, IS, H> = mem::transmute(heap::allocate(node_size, align));
+            let node_ptr: *mut UnsafeNode<K, V, IS, H> = mem::transmute(libc::malloc(node_size as libc::size_t));
             ptr::write(&mut (*node_ptr).ref_count, AtomicUsize::new(1));
             ptr::write(&mut (*node_ptr).entry_types, 0);
             ptr::write(&mut (*node_ptr).mask, mask);
@@ -372,11 +375,14 @@ impl<'a, K, V, IS, H> UnsafeNode<K, V, IS, H>
                 self.drop_entry(i)
             }
 
-            let align = mem::align_of::<AlignmentStruct<K, V, IS, H>>();
-            let header_size = align_to(mem::size_of::<UnsafeNode<K, V, IS, H>>(), align);
-            let node_size = header_size + (self.capacity as usize) * UnsafeNode::<K, V, IS, H>::node_entry_size();
+            // Let's use malloc and free for raw memory allocation so this library
+            // build on 'stable':
 
-            heap::deallocate(mem::transmute(self), node_size, align);
+            // let align = mem::align_of::<AlignmentStruct<K, V, IS, H>>();
+            // let header_size = align_to(mem::size_of::<UnsafeNode<K, V, IS, H>>(), align);
+            // let node_size = header_size + (self.capacity as usize) * UnsafeNode::<K, V, IS, H>::node_entry_size();
+            //heap::deallocate(mem::transmute(self), node_size, align);
+            libc::free(mem::transmute(self));
         }
     }
 

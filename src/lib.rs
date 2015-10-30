@@ -24,13 +24,11 @@
 //! information see [Wikipedia](https://en.wikipedia.org/wiki/Persistent_data_structure) for
 //! example.
 
-#![feature(alloc)]
-#![feature(heap_api)]
 #![cfg_attr(test, feature(test))]
 #![cfg_attr(test, feature(step_by))]
 #![allow(unused_parens)]
 
-extern crate alloc;
+extern crate libc;
 extern crate rand;
 
 #[cfg(test)]
