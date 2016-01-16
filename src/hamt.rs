@@ -28,12 +28,13 @@ use std::hash::{Hasher, Hash};
 use std::mem;
 use std::ptr;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use alloc::heap;
 use std::default::Default;
 
 use std::sync::Arc;
 use item_store::{ItemStore, ShareStore};
 
+#[cfg(feature = "nightly")]
+use alloc::heap;
 
 //=-------------------------------------------------------------------------------------------------
 // NodeRef
@@ -227,6 +228,33 @@ enum RemovalResult<K, V, IS, H> {
     KillSubTree
 }
 
+#[inline]
+#[cfg(feature = "nightly")]
+unsafe fn mem_alloc(size: usize, align: usize) -> *mut u8 {
+    heap::allocate(size, align)
+}
+
+#[inline]
+#[cfg(not(feature = "nightly"))]
+unsafe fn mem_alloc(size: usize, _align: usize) -> *mut u8 {
+    let mut v: Vec<u8> = Vec::with_capacity(size);
+    let ptr = v.as_mut_ptr();
+    mem::forget(v);
+    ptr
+}
+
+#[inline]
+#[cfg(feature = "nightly")]
+unsafe fn mem_free(ptr: *mut u8, size: usize, align: usize) {
+    heap::deallocate(ptr, size, align);
+}
+
+#[inline]
+#[cfg(not(feature = "nightly"))]
+unsafe fn mem_free(ptr: *mut u8, size: usize, _align: usize) {
+    mem::drop(Vec::from_raw_parts(ptr, 0, size));
+}
+
 // impl UnsafeNode
 impl<'a, K, V, IS, H> UnsafeNode<K, V, IS, H>
     where K: 'a,
@@ -355,7 +383,7 @@ impl<'a, K, V, IS, H> UnsafeNode<K, V, IS, H>
         let node_size = header_size + capacity * UnsafeNode::<K, V, IS, H>::node_entry_size();
 
         unsafe {
-            let node_ptr: *mut UnsafeNode<K, V, IS, H> = mem::transmute(heap::allocate(node_size, align));
+            let node_ptr: *mut UnsafeNode<K, V, IS, H> = mem::transmute(mem_alloc(node_size, align));
             ptr::write(&mut (*node_ptr).ref_count, AtomicUsize::new(1));
             ptr::write(&mut (*node_ptr).entry_types, 0);
             ptr::write(&mut (*node_ptr).mask, mask);
@@ -376,7 +404,7 @@ impl<'a, K, V, IS, H> UnsafeNode<K, V, IS, H>
             let header_size = align_to(mem::size_of::<UnsafeNode<K, V, IS, H>>(), align);
             let node_size = header_size + (self.capacity as usize) * UnsafeNode::<K, V, IS, H>::node_entry_size();
 
-            heap::deallocate(mem::transmute(self), node_size, align);
+            mem_free(mem::transmute(self), node_size, align);
         }
     }
 
@@ -1574,7 +1602,10 @@ mod tests {
     use super::get_index;
     use super::HamtMap;
     use testing::Test;
+    
+    #[cfg(feature = "nightly")]
     use test::Bencher;
+
     use std::collections::HashMap;
 
     type CopyStore = ::item_store::CopyStore<u64, u64>;
@@ -1668,66 +1699,79 @@ mod tests {
 // Bench HamtMap<CopyStore>
 //=-------------------------------------------------------------------------------------------------
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_insert_copy_10(bh: &mut Bencher) {
         Test::bench_insert(HamtMap::<u64, u64, CopyStore>::new(), 10, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_insert_copy_1000(bh: &mut Bencher) {
         Test::bench_insert(HamtMap::<u64, u64, CopyStore>::new(), 1000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_insert_copy_100000(bh: &mut Bencher) {
         Test::bench_insert(HamtMap::<u64, u64, CopyStore>::new(), 100000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_find_copy_10(bh: &mut Bencher) {
         Test::bench_find(HamtMap::<u64, u64, CopyStore>::new(), 10, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_find_copy_1000(bh: &mut Bencher) {
         Test::bench_find(HamtMap::<u64, u64, CopyStore>::new(), 1000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_find_copy_100000(bh: &mut Bencher) {
         Test::bench_find(HamtMap::<u64, u64, CopyStore>::new(), 100000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_remove_copy_10(bh: &mut Bencher) {
         Test::bench_remove(HamtMap::<u64, u64, CopyStore>::new(), 10, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_remove_copy_1000(bh: &mut Bencher) {
         Test::bench_remove(HamtMap::<u64, u64, CopyStore>::new(), 1000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_remove_copy_100000(bh: &mut Bencher) {
         Test::bench_remove(HamtMap::<u64, u64, CopyStore>::new(), 100000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_iterate_copy_10(bh: &mut Bencher) {
         bench_iterator_copy(HamtMap::<u64, u64, CopyStore>::new(), 10, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_iterate_copy_1000(bh: &mut Bencher) {
         bench_iterator_copy(HamtMap::<u64, u64, CopyStore>::new(), 1000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_iterate_copy_100000(bh: &mut Bencher) {
         bench_iterator_copy(HamtMap::<u64, u64, CopyStore>::new(), 100000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     fn bench_iterator_copy(mut map: HamtMap<u64, u64, CopyStore>,
                            size: usize,
                            bh: &mut Bencher) {
@@ -1801,66 +1845,79 @@ mod tests {
 // Bench HamtMap<ShareStore>
 //=-------------------------------------------------------------------------------------------------
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_insert_share_10(bh: &mut Bencher) {
         Test::bench_insert(HamtMap::<u64, u64, ShareStore>::new(), 10, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_insert_share_1000(bh: &mut Bencher) {
         Test::bench_insert(HamtMap::<u64, u64, ShareStore>::new(), 1000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_insert_share_100000(bh: &mut Bencher) {
         Test::bench_insert(HamtMap::<u64, u64, ShareStore>::new(), 100000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_find_share_10(bh: &mut Bencher) {
         Test::bench_find(HamtMap::<u64, u64, ShareStore>::new(), 10, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_find_share_1000(bh: &mut Bencher) {
         Test::bench_find(HamtMap::<u64, u64, ShareStore>::new(), 1000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_find_share_100000(bh: &mut Bencher) {
         Test::bench_find(HamtMap::<u64, u64, ShareStore>::new(), 100000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_remove_share_10(bh: &mut Bencher) {
         Test::bench_remove(HamtMap::<u64, u64, ShareStore>::new(), 10, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_remove_share_1000(bh: &mut Bencher) {
         Test::bench_remove(HamtMap::<u64, u64, ShareStore>::new(), 1000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_remove_share_100000(bh: &mut Bencher) {
         Test::bench_remove(HamtMap::<u64, u64, ShareStore>::new(), 100000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_iterate_share_10(bh: &mut Bencher) {
         bench_iterator_share(HamtMap::<u64, u64, ShareStore>::new(), 10, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_iterate_share_1000(bh: &mut Bencher) {
         bench_iterator_share(HamtMap::<u64, u64, ShareStore>::new(), 1000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     #[bench]
     fn bench_iterate_share_100000(bh: &mut Bencher) {
         bench_iterator_share(HamtMap::<u64, u64, ShareStore>::new(), 100000, bh);
     }
 
+    #[cfg(feature = "nightly")]
     fn bench_iterator_share(mut map: HamtMap<u64, u64, ShareStore>,
                             size: usize,
                             bh: &mut Bencher) {

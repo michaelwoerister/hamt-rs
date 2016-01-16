@@ -7,6 +7,9 @@ This is the persistent map datastructure used in Scala's and Clojure's standard 
 The idea to use a special *collision node* to deal with hash collisions is taken from Clojure's
 implementation.
 
+## Compatibility
+Both stable and nightly Rust are supported, but you'll need nightly Rust to run the benchmarks.
+
 ## Usage
 ```rust
 let mut map = HamtMap::new();

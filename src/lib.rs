@@ -24,16 +24,17 @@
 //! information see [Wikipedia](https://en.wikipedia.org/wiki/Persistent_data_structure) for
 //! example.
 
-#![feature(alloc)]
-#![feature(heap_api)]
-#![cfg_attr(test, feature(test))]
-#![cfg_attr(test, feature(step_by))]
+#![cfg_attr(feature = "nightly", feature(alloc))]
+#![cfg_attr(feature = "nightly", feature(heap_api))]
+#![cfg_attr(all(test, feature = "nightly"), feature(test))]
 #![allow(unused_parens)]
 
+#[cfg(feature = "nightly")]
 extern crate alloc;
+
 extern crate rand;
 
-#[cfg(test)]
+#[cfg(all(test, feature = "nightly"))]
 extern crate test;
 
 pub use hamt::HamtMap;

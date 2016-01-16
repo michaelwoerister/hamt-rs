@@ -19,6 +19,7 @@ rustc -C lto \
       -L dependency=./target/release \
       -L dependency=./target/release/deps \
       --extern rand=$RAND_LIB \
+      --cfg feature=\"nightly\" \
       ./src/lib.rs
 
 ./benchmark/hamt-bench --bench | python ./gen-perf-tables.py

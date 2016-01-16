@@ -2,6 +2,7 @@
 use rand::{self, Rng};
 use std::collections::HashMap;
 
+#[cfg(feature = "nightly")]
 use test::Bencher;
 
 use item_store::ItemStore;
@@ -22,7 +23,9 @@ macro_rules! assert_find(
     );
 );
 
+#[cfg(feature = "nightly")]
 static BENCH_FIND_COUNT: usize = 1000;
+#[cfg(feature = "nightly")]
 static BENCH_INSERT_COUNT: usize = 1000;
 
 pub struct Test;
@@ -205,6 +208,7 @@ impl Test {
     }
 }
 
+#[cfg(feature = "nightly")]
 fn create_random_std_hashmap(count: usize) -> HashMap<u64, u64> {
     let mut hashmap = HashMap::<u64, u64>::new();
     let mut rng = rand::thread_rng();
@@ -218,12 +222,15 @@ fn create_random_std_hashmap(count: usize) -> HashMap<u64, u64> {
 }
 
 
+#[cfg(feature = "nightly")]
 fn create_unique_values(count: usize) -> Vec<u64> {
     create_random_std_hashmap(count).keys().map(|x| *x).collect()
 }
 
+#[cfg(feature = "nightly")]
 pub static mut results: [Option<u64>; 1000000] = [None; 1000000];
 
+#[cfg(feature = "nightly")]
 impl Test {
 
     fn create_random_map<IS: ItemStore<u64, u64>>(empty: HamtMap<u64, u64, IS>, count: usize) -> (HamtMap<u64, u64, IS>, Vec<u64>) {
@@ -275,13 +282,16 @@ impl Test {
         bh.iter(|| {
             let mut map = map.clone();
 
-            for x in (0 .. count as usize).step_by(2) {
+            let mut x = 0usize;
+            while x < count {
                 map = map.minus(&keys[x]);
+                x += 2;
             }
         })
     }
 }
 
+#[cfg(feature = "nightly")]
 fn bench_find_hashmap(count: usize, bh: &mut Bencher) {
     let values = create_unique_values(count);
     let mut map = HashMap::new();
@@ -304,6 +314,7 @@ fn bench_find_hashmap(count: usize, bh: &mut Bencher) {
     })
 }
 
+#[cfg(feature = "nightly")]
 fn bench_insert_hashmap(count: usize, bh: &mut Bencher) {
     let values = create_unique_values(count + BENCH_INSERT_COUNT);
     let mut map = HashMap::new();
@@ -322,6 +333,7 @@ fn bench_insert_hashmap(count: usize, bh: &mut Bencher) {
     })
 }
 
+#[cfg(feature = "nightly")]
 fn bench_clone_hashmap(count: usize, bh: &mut Bencher) {
     let values = create_unique_values(count);
     let mut map = HashMap::new();
@@ -335,6 +347,7 @@ fn bench_clone_hashmap(count: usize, bh: &mut Bencher) {
     })
 }
 
+#[cfg(feature = "nightly")]
 fn bench_remove_hashmap(count: usize, bh: &mut Bencher) {
     let values = create_unique_values(count);
     let mut map = HashMap::new();
@@ -346,8 +359,10 @@ fn bench_remove_hashmap(count: usize, bh: &mut Bencher) {
     bh.iter(|| {
         let mut map1 = map.clone();
 
-        for x in (0..count).step_by(2) {
+        let mut x = 0;
+        while x < count {
             map1.remove(&values[x]);
+            x += 2;
         }
     })
 }
@@ -359,16 +374,19 @@ fn bench_remove_hashmap(count: usize, bh: &mut Bencher) {
 // Bench std::HashMap::find()
 //=-------------------------------------------------------------------------------------------------
 
+#[cfg(feature = "nightly")]
 #[bench]
 fn std_hashmap_find_10(bh: &mut Bencher) {
     bench_find_hashmap(10, bh);
 }
 
+#[cfg(feature = "nightly")]
 #[bench]
 fn std_hashmap_find_1000(bh: &mut Bencher) {
     bench_find_hashmap(1000, bh);
 }
 
+#[cfg(feature = "nightly")]
 #[bench]
 fn std_hashmap_find_100000(bh: &mut Bencher) {
     bench_find_hashmap(100000, bh);
@@ -380,31 +398,37 @@ fn std_hashmap_find_100000(bh: &mut Bencher) {
 // Bench std::HashMap::insert()
 //=-------------------------------------------------------------------------------------------------
 
+#[cfg(feature = "nightly")]
 #[bench]
 fn std_hashmap_insert_10(bh: &mut Bencher) {
     bench_insert_hashmap(10, bh);
 }
 
+#[cfg(feature = "nightly")]
 #[bench]
 fn std_hashmap_insert_1000(bh: &mut Bencher) {
     bench_insert_hashmap(1000, bh);
 }
 
+#[cfg(feature = "nightly")]
 #[bench]
 fn std_hashmap_insert_100000(bh: &mut Bencher) {
     bench_insert_hashmap(100000, bh);
 }
 
+#[cfg(feature = "nightly")]
 #[bench]
 fn std_hashmap_clone_10(bh: &mut Bencher) {
     bench_clone_hashmap(10, bh);
 }
 
+#[cfg(feature = "nightly")]
 #[bench]
 fn std_hashmap_clone_1000(bh: &mut Bencher) {
     bench_clone_hashmap(1000, bh);
 }
 
+#[cfg(feature = "nightly")]
 #[bench]
 fn std_hashmap_clone_100000(bh: &mut Bencher) {
     bench_clone_hashmap(100000, bh);
@@ -416,16 +440,19 @@ fn std_hashmap_clone_100000(bh: &mut Bencher) {
 // Bench std::HashMap::remove()
 //=-------------------------------------------------------------------------------------------------
 
+#[cfg(feature = "nightly")]
 #[bench]
 fn std_hashmap_remove_10(bh: &mut Bencher) {
     bench_remove_hashmap(10, bh);
 }
 
+#[cfg(feature = "nightly")]
 #[bench]
 fn std_hashmap_remove_1000(bh: &mut Bencher) {
     bench_remove_hashmap(1000, bh);
 }
 
+#[cfg(feature = "nightly")]
 #[bench]
 fn std_hashmap_remove_10000(bh: &mut Bencher) {
     bench_remove_hashmap(10000, bh);
