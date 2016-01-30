@@ -97,7 +97,8 @@ hamt_insert_10_percent = int((100 * timings["hamt-insert-10"]) / hashmap_insert_
 hamt_insert_1000_percent = int((100 * timings["hamt-insert-1000"]) / hashmap_insert_1000_nanos)
 hamt_insert_100000_percent = int((100 * timings["hamt-insert-100000"]) / hashmap_insert_100000_nanos)
 
-# Print FIND table (microseconds)
+
+print("FIND table (microseconds)\n\n");
 print(
 """
 | ELEMENT COUNT | HAMT    | HASHMAP |
@@ -112,7 +113,8 @@ print(
            hashmap_find_1000,
            hashmap_find_100000))
 
-# Print FIND table (percent)
+
+print("FIND table (percent)\n\n");
 print(
 """
 | ELEMENT COUNT | HAMT     | HASHMAP  |
@@ -127,7 +129,8 @@ print(
            100,
            100))
 
-# Print INSERT table (microseconds)
+
+print("INSERT table (microseconds)\n\n");
 print(
 """
 | ELEMENT COUNT | HAMT    | HASHMAP |
@@ -142,7 +145,8 @@ print(
            hashmap_insert_1000,
            hashmap_insert_100000))
 
-# Print INSERT table (percent)
+
+print("INSERT table (percent)\n\n");
 print(
 """
 | ELEMENT COUNT | HAMT     | HASHMAP  |
