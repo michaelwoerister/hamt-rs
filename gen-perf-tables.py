@@ -98,9 +98,10 @@ hamt_insert_1000_percent = int((100 * timings["hamt-insert-1000"]) / hashmap_ins
 hamt_insert_100000_percent = int((100 * timings["hamt-insert-100000"]) / hashmap_insert_100000_nanos)
 
 
-print("FIND table (microseconds)\n\n");
 print(
 """
+FIND (microseconds)
+
 | ELEMENT COUNT | HAMT    | HASHMAP |
 |:--------------|:-------:|:-------:|
 | 10            | {0:>7d} | {3:>7d} |
@@ -113,10 +114,10 @@ print(
            hashmap_find_1000,
            hashmap_find_100000))
 
-
-print("FIND table (percent)\n\n");
 print(
 """
+FIND (percent)
+
 | ELEMENT COUNT | HAMT     | HASHMAP  |
 |:--------------|:--------:|:--------:|
 | 10            | {0:>7d}% | {3:>7d}% |
@@ -129,10 +130,10 @@ print(
            100,
            100))
 
-
-print("INSERT table (microseconds)\n\n");
 print(
 """
+INSERT (microseconds)
+
 | ELEMENT COUNT | HAMT    | HASHMAP |
 |:--------------|:-------:|:-------:|
 | 10            | {0:>7d} | {3:>7d} |
@@ -145,10 +146,10 @@ print(
            hashmap_insert_1000,
            hashmap_insert_100000))
 
-
-print("INSERT table (percent)\n\n");
 print(
 """
+INSERT (percent)
+
 | ELEMENT COUNT | HAMT     | HASHMAP  |
 |:--------------|:--------:|:--------:|
 | 10            | {0:>7d}% | {3:>7d}% |
