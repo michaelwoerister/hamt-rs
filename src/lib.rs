@@ -24,18 +24,14 @@
 //! information see [Wikipedia](https://en.wikipedia.org/wiki/Persistent_data_structure) for
 //! example.
 
-#![cfg_attr(test, feature(test))]
-#![cfg_attr(test, feature(step_by))]
 #![allow(unused_parens)]
 
 extern crate libc;
 extern crate rand;
 
-#[cfg(test)]
-extern crate test;
-
 pub use hamt::HamtMap;
 pub use hamt::HamtMapIterator;
+pub use item_store::{ItemStore, ShareStore, CopyStore};
 
 mod hamt;
 mod item_store;

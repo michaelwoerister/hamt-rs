@@ -1580,7 +1580,6 @@ mod tests {
     use super::get_index;
     use super::HamtMap;
     use testing::Test;
-    use test::Bencher;
     use std::collections::HashMap;
 
     type CopyStore = ::item_store::CopyStore<u64, u64>;
@@ -1671,84 +1670,6 @@ mod tests {
 
 
 //=-------------------------------------------------------------------------------------------------
-// Bench HamtMap<CopyStore>
-//=-------------------------------------------------------------------------------------------------
-
-    #[bench]
-    fn bench_insert_copy_10(bh: &mut Bencher) {
-        Test::bench_insert(HamtMap::<u64, u64, CopyStore>::new(), 10, bh);
-    }
-
-    #[bench]
-    fn bench_insert_copy_1000(bh: &mut Bencher) {
-        Test::bench_insert(HamtMap::<u64, u64, CopyStore>::new(), 1000, bh);
-    }
-
-    #[bench]
-    fn bench_insert_copy_100000(bh: &mut Bencher) {
-        Test::bench_insert(HamtMap::<u64, u64, CopyStore>::new(), 100000, bh);
-    }
-
-    #[bench]
-    fn bench_find_copy_10(bh: &mut Bencher) {
-        Test::bench_find(HamtMap::<u64, u64, CopyStore>::new(), 10, bh);
-    }
-
-    #[bench]
-    fn bench_find_copy_1000(bh: &mut Bencher) {
-        Test::bench_find(HamtMap::<u64, u64, CopyStore>::new(), 1000, bh);
-    }
-
-    #[bench]
-    fn bench_find_copy_100000(bh: &mut Bencher) {
-        Test::bench_find(HamtMap::<u64, u64, CopyStore>::new(), 100000, bh);
-    }
-
-    #[bench]
-    fn bench_remove_copy_10(bh: &mut Bencher) {
-        Test::bench_remove(HamtMap::<u64, u64, CopyStore>::new(), 10, bh);
-    }
-
-    #[bench]
-    fn bench_remove_copy_1000(bh: &mut Bencher) {
-        Test::bench_remove(HamtMap::<u64, u64, CopyStore>::new(), 1000, bh);
-    }
-
-    #[bench]
-    fn bench_remove_copy_100000(bh: &mut Bencher) {
-        Test::bench_remove(HamtMap::<u64, u64, CopyStore>::new(), 100000, bh);
-    }
-
-    #[bench]
-    fn bench_iterate_copy_10(bh: &mut Bencher) {
-        bench_iterator_copy(HamtMap::<u64, u64, CopyStore>::new(), 10, bh);
-    }
-
-    #[bench]
-    fn bench_iterate_copy_1000(bh: &mut Bencher) {
-        bench_iterator_copy(HamtMap::<u64, u64, CopyStore>::new(), 1000, bh);
-    }
-
-    #[bench]
-    fn bench_iterate_copy_100000(bh: &mut Bencher) {
-        bench_iterator_copy(HamtMap::<u64, u64, CopyStore>::new(), 100000, bh);
-    }
-
-    fn bench_iterator_copy(mut map: HamtMap<u64, u64, CopyStore>,
-                           size: usize,
-                           bh: &mut Bencher) {
-        for i in (0u64 .. size as u64) {
-            map = map.plus(i, i);
-        }
-
-        bh.iter(|| {
-            for _ in map.iter() {}
-        })
-    }
-
-
-
-//=-------------------------------------------------------------------------------------------------
 // Test HamtMap<ShareStore>
 //=-------------------------------------------------------------------------------------------------
 
@@ -1801,81 +1722,5 @@ mod tests {
     #[test]
     fn stress_test_share() {
         Test::random_insert_remove_stress_test(HamtMap::<u64, u64, ShareStore>::new());
-    }
-
-//=-------------------------------------------------------------------------------------------------
-// Bench HamtMap<ShareStore>
-//=-------------------------------------------------------------------------------------------------
-
-    #[bench]
-    fn bench_insert_share_10(bh: &mut Bencher) {
-        Test::bench_insert(HamtMap::<u64, u64, ShareStore>::new(), 10, bh);
-    }
-
-    #[bench]
-    fn bench_insert_share_1000(bh: &mut Bencher) {
-        Test::bench_insert(HamtMap::<u64, u64, ShareStore>::new(), 1000, bh);
-    }
-
-    #[bench]
-    fn bench_insert_share_100000(bh: &mut Bencher) {
-        Test::bench_insert(HamtMap::<u64, u64, ShareStore>::new(), 100000, bh);
-    }
-
-    #[bench]
-    fn bench_find_share_10(bh: &mut Bencher) {
-        Test::bench_find(HamtMap::<u64, u64, ShareStore>::new(), 10, bh);
-    }
-
-    #[bench]
-    fn bench_find_share_1000(bh: &mut Bencher) {
-        Test::bench_find(HamtMap::<u64, u64, ShareStore>::new(), 1000, bh);
-    }
-
-    #[bench]
-    fn bench_find_share_100000(bh: &mut Bencher) {
-        Test::bench_find(HamtMap::<u64, u64, ShareStore>::new(), 100000, bh);
-    }
-
-    #[bench]
-    fn bench_remove_share_10(bh: &mut Bencher) {
-        Test::bench_remove(HamtMap::<u64, u64, ShareStore>::new(), 10, bh);
-    }
-
-    #[bench]
-    fn bench_remove_share_1000(bh: &mut Bencher) {
-        Test::bench_remove(HamtMap::<u64, u64, ShareStore>::new(), 1000, bh);
-    }
-
-    #[bench]
-    fn bench_remove_share_100000(bh: &mut Bencher) {
-        Test::bench_remove(HamtMap::<u64, u64, ShareStore>::new(), 100000, bh);
-    }
-
-    #[bench]
-    fn bench_iterate_share_10(bh: &mut Bencher) {
-        bench_iterator_share(HamtMap::<u64, u64, ShareStore>::new(), 10, bh);
-    }
-
-    #[bench]
-    fn bench_iterate_share_1000(bh: &mut Bencher) {
-        bench_iterator_share(HamtMap::<u64, u64, ShareStore>::new(), 1000, bh);
-    }
-
-    #[bench]
-    fn bench_iterate_share_100000(bh: &mut Bencher) {
-        bench_iterator_share(HamtMap::<u64, u64, ShareStore>::new(), 100000, bh);
-    }
-
-    fn bench_iterator_share(mut map: HamtMap<u64, u64, ShareStore>,
-                            size: usize,
-                            bh: &mut Bencher) {
-        for i in (0u64 .. size as u64) {
-            map = map.plus(i, i);
-        }
-
-        bh.iter(|| {
-            for _ in map.iter() {}
-        })
     }
 }
