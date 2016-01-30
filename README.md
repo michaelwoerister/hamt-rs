@@ -37,17 +37,17 @@ Times (in microseconds) for one thousand lookups in a collection with *ELEMENT C
 
 | ELEMENT COUNT | HAMT    | HASHMAP |
 |:--------------|:-------:|:-------:|
-| 10            |      33 |      36 |
-| 1000          |      40 |      54 |
-| 100000        |      62 |      56 |
+| 10            |      34 |      32 |
+| 1000          |      49 |      37 |
+| 100000        |      72 |      44 |
 
 In percent over std::HashMap (less than 100% means faster, more means slower than std::HashMap).
 
 | ELEMENT COUNT | HAMT     | HASHMAP  |
 |:--------------|:--------:|:--------:|
-| 10            |      91% |     100% |
-| 1000          |      74% |     100% |
-| 100000        |     110% |     100% |
+| 10            |     106% |     100% |
+| 1000          |     130% |     100% |
+| 100000        |     160% |     100% |
 
 The HAMT is in the same ballpark as the std::HashMap, even for larger collections.
 ~~Also, LLVM unfortunately does not (yet) properly translate the `cntpop` intrinsic function
@@ -60,18 +60,16 @@ Times (in microseconds) for one thousand insertions into a collection with *ELEM
 
 | ELEMENT COUNT | HAMT    | HASHMAP |
 |:--------------|:-------:|:-------:|
-| 10            |     101 |      44 |
-| 1000          |     145 |     115 |
-| 100000        |    1156 |      32 |
+| 10            |     133 |      48 |
+| 1000          |     185 |      76 |
+| 100000        |    1521 |      99 |
 
 In percent over std::HashMap (less than 100% means faster, more means slower than std::HashMap).
 
 | ELEMENT COUNT | HAMT     | HASHMAP  |
 |:--------------|:--------:|:--------:|
-| 10            |     229% |     100% |
-| 1000          |     126% |     100% |
-| 100000        |    3612% |     100% |
+| 10            |     279% |     100% |
+| 1000          |     242% |     100% |
+| 100000        |    1537% |     100% |
 
 As can be seen, the HAMT holds up pretty well against the non-persistent std::HashMap.
-
-In conclusion, even with (atomic, multithreaded) refcounting a HAMT can perform pretty well :)
