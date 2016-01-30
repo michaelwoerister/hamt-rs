@@ -43,33 +43,40 @@ for line in sys.stdin.readlines():
   time = extract_time(line)
   if time:
     key = extract_key(line)
-    timings[key] = int(float(time) * 0.001 + 0.5)
-    print(key + ": " + time + " -> " + str(timings[key]))
+    timings[key] = int(time)
+    print("timings[" + key + "] = " + str(timings[key]))
 
 
-hamt_find_10 = timings["hamt-find-10"]
-hamt_find_1000 = timings["hamt-find-1000"]
-hamt_find_100000 = timings["hamt-find-100000"]
+def to_micro_secs(t):
+  return int(float(t) * 0.001 + 0.5)
 
-hashmap_find_10 = timings["hashmap-find-10"]
-hashmap_find_1000 = timings["hashmap-find-1000"]
-hashmap_find_100000 = timings["hashmap-find-100000"]
+hamt_find_10 = to_micro_secs(timings["hamt-find-10"])
+hamt_find_1000 = to_micro_secs(timings["hamt-find-1000"])
+hamt_find_100000 = to_micro_secs(timings["hamt-find-100000"])
 
-hamt_find_10_percent = int((100 * hamt_find_10) / hashmap_find_10)
-hamt_find_1000_percent = int((100 * hamt_find_1000) / hashmap_find_1000)
-hamt_find_100000_percent = int((100 * hamt_find_100000) / hashmap_find_100000)
+hashmap_find_10 = to_micro_secs(timings["hashmap-find-10"])
+hashmap_find_1000 = to_micro_secs(timings["hashmap-find-1000"])
+hashmap_find_100000 = to_micro_secs(timings["hashmap-find-100000"])
 
-hamt_insert_10 = timings["hamt-insert-10"]
-hamt_insert_1000 = timings["hamt-insert-1000"]
-hamt_insert_100000 = timings["hamt-insert-100000"]
+hamt_find_10_percent = int((100 * timings["hamt-find-10"]) / timings["hashmap-find-10"])
+hamt_find_1000_percent = int((100 * timings["hamt-find-1000"]) / timings["hashmap-find-1000"])
+hamt_find_100000_percent = int((100 * timings["hamt-find-100000"]) / timings["hashmap-find-100000"])
 
-hashmap_insert_10 = timings["hashmap-insert-10"] - timings["hashmap-clone-10"]
-hashmap_insert_1000 = timings["hashmap-insert-1000"] - timings["hashmap-clone-1000"]
-hashmap_insert_100000 = timings["hashmap-insert-100000"] - timings["hashmap-clone-100000"]
+hamt_insert_10 = to_micro_secs(timings["hamt-insert-10"])
+hamt_insert_1000 = to_micro_secs(timings["hamt-insert-1000"])
+hamt_insert_100000 = to_micro_secs(timings["hamt-insert-100000"])
 
-hamt_insert_10_percent = int((100 * hamt_insert_10) / hashmap_insert_10)
-hamt_insert_1000_percent = int((100 * hamt_insert_1000) / hashmap_insert_1000)
-hamt_insert_100000_percent = int((100 * hamt_insert_100000) / hashmap_insert_100000)
+hashmap_insert_10_nanos = timings["hashmap-insert-10"] - timings["hashmap-clone-10"]
+hashmap_insert_1000_nanos = timings["hashmap-insert-1000"] - timings["hashmap-clone-1000"]
+hashmap_insert_100000_nanos = timings["hashmap-insert-100000"] - timings["hashmap-clone-100000"]
+
+hashmap_insert_10 = to_micro_secs(hashmap_insert_10_nanos)
+hashmap_insert_1000 = to_micro_secs(hashmap_insert_1000_nanos)
+hashmap_insert_100000 = to_micro_secs(hashmap_insert_100000_nanos)
+
+hamt_insert_10_percent = int((100 * timings["hamt-insert-10"]) / hashmap_insert_10_nanos)
+hamt_insert_1000_percent = int((100 * timings["hamt-insert-1000"]) / hashmap_insert_1000_nanos)
+hamt_insert_100000_percent = int((100 * timings["hamt-insert-100000"]) / hashmap_insert_100000_nanos)
 
 # Print FIND table (microseconds)
 print(
