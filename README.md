@@ -1,4 +1,4 @@
-rs-persistent-datastructures [![Build Status](https://travis-ci.org/michaelwoerister/rs-persistent-datastructures.svg?branch=master)](https://travis-ci.org/michaelwoerister/rs-persistent-datastructures)
+hamt-rs [![Build Status](https://travis-ci.org/michaelwoerister/rs-persistent-datastructures.svg?branch=master)](https://travis-ci.org/michaelwoerister/rs-persistent-datastructures)
 ============================
 
 A Hash Array Mapped Trie implementation based on the
