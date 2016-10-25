@@ -18,6 +18,7 @@ rustc "src/lib.rs" \
       --crate-name "hamt" \
       --crate-type lib \
       -C opt-level=3 \
+      -C target-feature=+popcnt \
       -o "benchmark/libhamt.rlib" \
       -L dependency="target/release" \
       -L dependency="target/release/deps" \
@@ -28,6 +29,8 @@ rustc "benches/benches.rs" \
       --crate-name "benches" \
       --crate-type bin \
       -C opt-level=3 \
+      -C lto \
+      -C target-feature=+popcnt \
       --test \
       -o "benchmark/hamt-bench" \
       -L dependency="target/release" \
