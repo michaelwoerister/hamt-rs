@@ -24,6 +24,7 @@
 //! The idea to use a special *collision node* to deal with hash collisions is taken from Clojure's
 //! implementation.
 
+use std::collections::hash_map::DefaultHasher as StdHasher;
 use std::hash::{Hasher, Hash};
 use std::mem;
 use std::ptr;
@@ -1152,7 +1153,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
 //=-------------------------------------------------------------------------------------------------
 // HamtMap
 //=-------------------------------------------------------------------------------------------------
-pub struct HamtMap<K, V, IS=ShareStore<K,V>, H= ::std::hash::SipHasher> {
+pub struct HamtMap<K, V, IS=ShareStore<K,V>, H=StdHasher> {
     root: NodeRef<K, V, IS, H>,
     element_count: usize,
 }

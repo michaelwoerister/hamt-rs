@@ -29,6 +29,7 @@ extern crate rand;
 use test::Bencher;
 use rand::{Rng};
 use std::collections::HashMap;
+use std::collections::hash_map::DefaultHasher as StdHasher;
 
 use hamt::{ItemStore, ShareStore, CopyStore};
 use hamt::HamtMap;
@@ -66,7 +67,7 @@ fn create_unique_values(count: usize) -> Vec<u64> {
     create_random_std_hashmap(count).keys().map(|x| *x).collect()
 }
 
-pub static mut results: [Option<u64>; 1000000] = [None; 1000000];
+pub static mut RESULTS: [Option<u64>; 1000000] = [None; 1000000];
 
 fn create_random_hamt<IS: ItemStore<u64, u64>>(empty: HamtMap<u64, u64, IS>, count: usize) -> (HamtMap<u64, u64, IS>, Vec<u64>) {
     let keys = create_unique_values(count);
@@ -90,8 +91,8 @@ fn bench_hamt_find<IS: ItemStore<u64, u64>>(empty: HamtMap<u64, u64, IS>, count:
 
             unsafe {
                 match map.find(&val) {
-                    Some(&x) => results[i] = Some(x),
-                    None => results[i] = None,
+                    Some(&x) => RESULTS[i] = Some(x),
+                    None => RESULTS[i] = None,
                 }
             }
         }
@@ -140,8 +141,8 @@ fn bench_std_hashmap_find(count: usize, bh: &mut Bencher) {
 
             unsafe {
                 match map.get(&val) {
-                    Some(&x) => results[i] = Some(x),
-                    None => results[i] = None,
+                    Some(&x) => RESULTS[i] = Some(x),
+                    None => RESULTS[i] = None,
                 }
             }
         }
@@ -280,7 +281,7 @@ fn bench_std_hashmap_remove_10000(bh: &mut Bencher) {
 // Bench HamtMap<ShareStore>
 //=-------------------------------------------------------------------------------------------------
 
-type ShareStoreHamt = HamtMap<u64, u64, ShareStore<u64,u64>,::std::hash::SipHasher>;
+type ShareStoreHamt = HamtMap<u64, u64, ShareStore<u64,u64>, StdHasher>;
 
 #[bench]
 fn bench_hamt_insert_share_10(bh: &mut Bencher) {
@@ -359,7 +360,7 @@ fn bench_hamt_iterate_share(mut map: ShareStoreHamt,
 // Bench HamtMap<CopyStore>
 //=-------------------------------------------------------------------------------------------------
 
-type CopyStoreHamt = HamtMap<u64, u64, CopyStore<u64, u64>, ::std::hash::SipHasher>;
+type CopyStoreHamt = HamtMap<u64, u64, CopyStore<u64, u64>, StdHasher>;
 
 #[bench]
 fn bench_hamt_insert_copy_10(bh: &mut Bencher) {
