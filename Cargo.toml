@@ -1,6 +1,6 @@
 [package]
 name = "hamt-rs"
-version = "0.2.1"
+version = "0.2.2"
 authors = [ "Michael Woerister" ]
 description = "A Hash Array Mapped Trie implementation based on the *Ideal Hash Trees* paper by Phil Bagwell."
 readme = "README.md"
