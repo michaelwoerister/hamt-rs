@@ -24,6 +24,7 @@
 //! The idea to use a special *collision node* to deal with hash collisions is taken from Clojure's
 //! implementation.
 
+
 use std::hash::{Hasher, Hash};
 use std::mem;
 use std::ptr;
@@ -33,13 +34,17 @@ use std::default::Default;
 use std::sync::Arc;
 use item_store::{ItemStore, ShareStore};
 
-use libc;
-
 #[cfg(feature="hashmap_default_hasher")]
 use std::collections::hash_map::DefaultHasher as StdHasher;
 
 #[cfg(not(feature="hashmap_default_hasher"))]
 use std::hash::SipHasher as StdHasher;
+
+#[cfg(feature="rust_alloc")]
+use alloc::heap;
+#[cfg(not(feature="rust_alloc"))]
+use libc;
+
 
 //=-------------------------------------------------------------------------------------------------
 // NodeRef
@@ -361,10 +366,7 @@ impl<'a, K, V, IS, H> UnsafeNode<K, V, IS, H>
         let node_size = header_size + capacity * UnsafeNode::<K, V, IS, H>::node_entry_size();
 
         unsafe {
-            // Let's use malloc and free for raw memory allocation so this library
-            // build on 'stable':
-            // let node_ptr: *mut UnsafeNode<K, V, IS, H> = mem::transmute(heap::allocate(node_size, align));
-            let node_ptr: *mut UnsafeNode<K, V, IS, H> = mem::transmute(libc::malloc(node_size as libc::size_t));
+            let node_ptr: *mut UnsafeNode<K, V, IS, H> = mem::transmute(allocate(node_size, align));
             ptr::write(&mut (*node_ptr).ref_count, AtomicUsize::new(1));
             ptr::write(&mut (*node_ptr).entry_types, 0);
             ptr::write(&mut (*node_ptr).mask, mask);
@@ -384,11 +386,10 @@ impl<'a, K, V, IS, H> UnsafeNode<K, V, IS, H>
             // Let's use malloc and free for raw memory allocation so this library
             // build on 'stable':
 
-            // let align = mem::align_of::<AlignmentStruct<K, V, IS, H>>();
-            // let header_size = align_to(mem::size_of::<UnsafeNode<K, V, IS, H>>(), align);
-            // let node_size = header_size + (self.capacity as usize) * UnsafeNode::<K, V, IS, H>::node_entry_size();
-            //heap::deallocate(mem::transmute(self), node_size, align);
-            libc::free(mem::transmute(self));
+            let align = mem::align_of::<AlignmentStruct<K, V, IS, H>>();
+            let header_size = align_to(mem::size_of::<UnsafeNode<K, V, IS, H>>(), align);
+            let node_size = header_size + (self.capacity as usize) * UnsafeNode::<K, V, IS, H>::node_entry_size();
+            deallocate(mem::transmute(self), node_size, align);
         }
     }
 
@@ -1575,10 +1576,35 @@ fn align_to(size: usize, align: usize) -> usize {
     (size + align - 1) & !(align - 1)
 }
 
+#[inline]
 fn hash_of<T: Hash, H: Hasher + Default>(value: &T) -> u64 {
     let mut h: H = Default::default();
     value.hash(&mut h);
     h.finish()
+}
+
+#[cfg(feature="rust_alloc")]
+#[inline(always)]
+pub unsafe fn allocate(size: usize, align: usize) -> *mut u8 {
+    heap::allocate(size, align)
+}
+
+#[cfg(not(feature="rust_alloc"))]
+#[inline(always)]
+pub unsafe fn allocate(size: usize, _align: usize) -> *mut u8 {
+    libc::malloc(size as libc::size_t) as *mut u8
+}
+
+#[cfg(feature="rust_alloc")]
+#[inline(always)]
+pub unsafe fn deallocate(ptr: *mut u8, old_size: usize, align: usize) {
+    heap::deallocate(ptr, old_size, align)
+}
+
+#[cfg(not(feature="rust_alloc"))]
+#[inline(always)]
+pub unsafe fn deallocate(ptr: *mut u8, _old_size: usize, _align: usize) {
+    libc::free(ptr as *mut libc::c_void)
 }
 
 #[cfg(test)]

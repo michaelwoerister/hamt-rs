@@ -5,7 +5,7 @@ set -e
 
 # Make sure dependency binaries are available
 cargo clean
-cargo build --release
+cargo build --release --features="rust_alloc hashmap_default_hasher"
 
 # Get the filename of the rand library
 RAND_LIB=`find . -wholename "*release/deps*librand*"`
@@ -15,7 +15,7 @@ LIBC_LIB=`find . -wholename "*release/deps*liblibc*"`
 mkdir -p benchmark
 
 rustc "src/lib.rs" \
-      --crate-name "hamt" \
+      --crate-name "hamt_rs" \
       --crate-type lib \
       -C opt-level=3 \
       -C target-feature=+popcnt \
@@ -23,7 +23,10 @@ rustc "src/lib.rs" \
       -L dependency="target/release" \
       -L dependency="target/release/deps" \
       --extern libc="$LIBC_LIB" \
-      --extern rand="$RAND_LIB"
+      --extern rand="$RAND_LIB" \
+      --cfg feature=\"rust_alloc\" \
+      --cfg feature=\"hashmap_default_hasher\"
+
 
 rustc "benches/benches.rs" \
       --crate-name "benches" \
@@ -37,6 +40,7 @@ rustc "benches/benches.rs" \
       -L dependency="target/release/deps" \
       --extern libc="$LIBC_LIB" \
       --extern rand="$RAND_LIB" \
-      --extern hamt="benchmark/libhamt.rlib"
+      --extern hamt_rs="benchmark/libhamt.rlib" \
+      --cfg feature=\"hashmap_default_hasher\"
 
 ./benchmark/hamt-bench --bench | python ./gen-perf-tables.py

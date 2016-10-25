@@ -13,7 +13,8 @@ libc = "^0.2"
 rand = "^0.3.9"
 
 [features]
-default = []
+# Use Rust's unstable allocation API. Only works on nightly.
+rust_alloc = []
 
 # Use this if you want to get rid of the SipHasher deprecation warning.
 hashmap_default_hasher = []
