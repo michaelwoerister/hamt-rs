@@ -1,8 +1,12 @@
 [package]
-
-name = "hamt"
-version = "0.1.0"
+name = "hamt-rs"
+version = "0.2.0"
 authors = [ "michaelwoerister@posteo.net" ]
+description = "A Hash Array Mapped Trie implementation based on the *Ideal Hash Trees* paper by Phil Bagwell."
+readme = "README.md"
+repository = "https://github.com/michaelwoerister/hamt-rs"
+keywords = ["hamt", "persistent", "datastructure", "trie"]
+license = "MIT"
 
 [dependencies]
 libc = "*"
