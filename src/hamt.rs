@@ -24,7 +24,6 @@
 //! The idea to use a special *collision node* to deal with hash collisions is taken from Clojure's
 //! implementation.
 
-use std::collections::hash_map::DefaultHasher as StdHasher;
 use std::hash::{Hasher, Hash};
 use std::mem;
 use std::ptr;
@@ -35,6 +34,12 @@ use std::sync::Arc;
 use item_store::{ItemStore, ShareStore};
 
 use libc;
+
+#[cfg(feature="hashmap_default_hasher")]
+use std::collections::hash_map::DefaultHasher as StdHasher;
+
+#[cfg(not(feature="hashmap_default_hasher"))]
+use std::hash::SipHasher as StdHasher;
 
 //=-------------------------------------------------------------------------------------------------
 // NodeRef

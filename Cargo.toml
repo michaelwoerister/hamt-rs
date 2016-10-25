@@ -5,9 +5,15 @@ authors = [ "michaelwoerister@posteo.net" ]
 description = "A Hash Array Mapped Trie implementation based on the *Ideal Hash Trees* paper by Phil Bagwell."
 readme = "README.md"
 repository = "https://github.com/michaelwoerister/hamt-rs"
-keywords = ["hamt", "persistent", "datastructure", "trie"]
+keywords = ["hamt", "persistent", "datastructure", "trie", "hash"]
 license = "MIT"
 
 [dependencies]
 libc = "*"
 rand = "0.3.9"
+
+[features]
+default = []
+
+# Use this if you want to get rid of the SipHasher deprecation warning.
+hashmap_default_hasher = []

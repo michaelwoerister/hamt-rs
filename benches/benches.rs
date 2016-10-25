@@ -23,16 +23,20 @@
 #![allow(unused_parens)]
 
 extern crate test;
-extern crate hamt;
+extern crate hamt_rs;
 extern crate rand;
 
 use test::Bencher;
 use rand::{Rng};
 use std::collections::HashMap;
-use std::collections::hash_map::DefaultHasher as StdHasher;
 
-use hamt::{ItemStore, ShareStore, CopyStore};
-use hamt::HamtMap;
+#[cfg(feature="hashmap_default_hasher")]
+use std::collections::hash_map::DefaultHasher as StdHasher;
+#[cfg(not(feature="hashmap_default_hasher"))]
+use std::hash::SipHasher as StdHasher;
+
+use hamt_rs::{ItemStore, ShareStore, CopyStore};
+use hamt_rs::HamtMap;
 
 macro_rules! assert_find(
     ($map:ident, $key:expr, None) => (
