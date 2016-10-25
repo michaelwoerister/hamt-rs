@@ -9,8 +9,8 @@ keywords = ["hamt", "persistent", "datastructure", "trie", "hash"]
 license = "MIT"
 
 [dependencies]
-libc = "*"
-rand = "0.3.9"
+libc = "^0.2"
+rand = "^0.3.9"
 
 [features]
 default = []
