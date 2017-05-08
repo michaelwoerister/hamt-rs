@@ -161,6 +161,7 @@ const INVALID_ENTRY: usize = 0b00;
 // The central node type used by the implementation. Note that this struct just represents the
 // header of the node data. The actual entries are allocated directly after this header, starting
 // at the address of the `__entries` field.
+#[repr(C)]
 struct UnsafeNode<K, V, IS, H> {
     // The current number of references to this node.
     ref_count: AtomicUsize,
