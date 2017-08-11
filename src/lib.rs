@@ -26,12 +26,6 @@
 
 #![allow(unused_parens)]
 
-#![cfg_attr(feature="rust_alloc", feature(heap_api))]
-#![cfg_attr(feature="rust_alloc", feature(alloc))]
-
-#[cfg(feature="rust_alloc")]
-extern crate alloc;
-#[cfg(not(feature="rust_alloc"))]
 extern crate libc;
 
 extern crate rand;

@@ -6,9 +6,9 @@ rust:
 sudo: false
 script:
   - if [ "$TRAVIS_RUST_VERSION" = "nightly" ]; then
-      cargo build --verbose --features="hashmap_default_hasher";
-      cargo test --verbose --features="hashmap_default_hasher";
-      cargo bench --verbose --features="hashmap_default_hasher";
+      cargo build --verbose;
+      cargo test --verbose;
+      cargo bench --verbose;
     else
       cargo build --verbose;
       cargo test --verbose;

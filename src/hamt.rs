@@ -34,15 +34,7 @@ use std::default::Default;
 use std::sync::Arc;
 use item_store::{ItemStore, ShareStore};
 
-#[cfg(feature="hashmap_default_hasher")]
 use std::collections::hash_map::DefaultHasher as StdHasher;
-
-#[cfg(not(feature="hashmap_default_hasher"))]
-use std::hash::SipHasher as StdHasher;
-
-#[cfg(feature="rust_alloc")]
-use alloc::heap;
-#[cfg(not(feature="rust_alloc"))]
 use libc;
 
 
@@ -1584,25 +1576,11 @@ fn hash_of<T: Hash, H: Hasher + Default>(value: &T) -> u64 {
     h.finish()
 }
 
-#[cfg(feature="rust_alloc")]
-#[inline(always)]
-pub unsafe fn allocate(size: usize, align: usize) -> *mut u8 {
-    heap::allocate(size, align)
-}
-
-#[cfg(not(feature="rust_alloc"))]
 #[inline(always)]
 pub unsafe fn allocate(size: usize, _align: usize) -> *mut u8 {
     libc::malloc(size as libc::size_t) as *mut u8
 }
 
-#[cfg(feature="rust_alloc")]
-#[inline(always)]
-pub unsafe fn deallocate(ptr: *mut u8, old_size: usize, align: usize) {
-    heap::deallocate(ptr, old_size, align)
-}
-
-#[cfg(not(feature="rust_alloc"))]
 #[inline(always)]
 pub unsafe fn deallocate(ptr: *mut u8, _old_size: usize, _align: usize) {
     libc::free(ptr as *mut libc::c_void)

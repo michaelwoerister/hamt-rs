@@ -19,7 +19,6 @@
 // THE SOFTWARE.
 
 #![feature(test)]
-#![feature(step_by)]
 #![allow(unused_parens)]
 
 extern crate test;
@@ -30,27 +29,10 @@ use test::Bencher;
 use rand::{Rng};
 use std::collections::HashMap;
 
-#[cfg(feature="hashmap_default_hasher")]
 use std::collections::hash_map::DefaultHasher as StdHasher;
-#[cfg(not(feature="hashmap_default_hasher"))]
-use std::hash::SipHasher as StdHasher;
 
 use hamt_rs::{ItemStore, ShareStore, CopyStore};
 use hamt_rs::HamtMap;
-
-macro_rules! assert_find(
-    ($map:ident, $key:expr, None) => (
-        assert!($map.find(&$key).is_none());
-    );
-    ($map:ident, $key:expr, $val:expr) => (
-        match $map.find(&$key) {
-            Some(&value) => {
-                assert_eq!(value, $val);
-            }
-            _ => panic!()
-        };
-    );
-);
 
 static BENCH_FIND_COUNT: usize = 1000;
 static BENCH_INSERT_COUNT: usize = 1000;
@@ -122,7 +104,7 @@ fn bench_hamt_remove<IS: ItemStore<u64, u64>>(empty: HamtMap<u64, u64, IS>, coun
     bh.iter(|| {
         let mut map = map.clone();
 
-        for x in (0 .. count as usize).step_by(2) {
+        for x in (0 .. count).filter(|x| x % 2 == 0) {
             map = map.minus(&keys[x]);
         }
     })
@@ -195,7 +177,7 @@ fn bench_std_hashmap_remove(count: usize, bh: &mut Bencher) {
     bh.iter(|| {
         let mut map1 = map.clone();
 
-        for x in (0..count).step_by(2) {
+        for x in (0..count).filter(|x| x % 2 == 0) {
             map1.remove(&values[x]);
         }
     })

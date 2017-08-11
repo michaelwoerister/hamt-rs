@@ -23,9 +23,7 @@ rustc "src/lib.rs" \
       -L dependency="target/release" \
       -L dependency="target/release/deps" \
       --extern libc="$LIBC_LIB" \
-      --extern rand="$RAND_LIB" \
-      --cfg feature=\"rust_alloc\" \
-      --cfg feature=\"hashmap_default_hasher\"
+      --extern rand="$RAND_LIB"
 
 
 rustc "benches/benches.rs" \
@@ -40,7 +38,6 @@ rustc "benches/benches.rs" \
       -L dependency="target/release/deps" \
       --extern libc="$LIBC_LIB" \
       --extern rand="$RAND_LIB" \
-      --extern hamt_rs="benchmark/libhamt.rlib" \
-      --cfg feature=\"hashmap_default_hasher\"
+      --extern hamt_rs="benchmark/libhamt.rlib"
 
 ./benchmark/hamt-bench --bench | python ./gen-perf-tables.py
