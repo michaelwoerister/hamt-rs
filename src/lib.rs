@@ -28,8 +28,6 @@
 
 extern crate libc;
 
-extern crate rand;
-
 pub use hamt::HamtMap;
 pub use hamt::HamtMapIterator;
 pub use item_store::{ItemStore, ShareStore, CopyStore};
