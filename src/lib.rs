@@ -27,6 +27,8 @@
 #![allow(unused_parens)]
 
 extern crate libc;
+#[cfg(test)]
+extern crate rand;
 
 pub use hamt::HamtMap;
 pub use hamt::HamtMapIterator;
