@@ -76,7 +76,7 @@ fn bench_hamt_find<IS: ItemStore<u64, u64>>(empty: HamtMap<u64, u64, IS>, count:
             let val = val + (i as u64 & 1);
 
             unsafe {
-                match map.find(&val) {
+                match test::black_box(map.find(&val)) {
                     Some(&x) => RESULTS[i] = Some(x),
                     None => RESULTS[i] = None,
                 }
@@ -93,7 +93,7 @@ fn bench_hamt_insert<IS: ItemStore<u64, u64>>(empty: HamtMap<u64, u64, IS>, coun
 
         for i in (0usize .. BENCH_INSERT_COUNT) {
             let val = keys[count + i];
-            map1 = map1.plus(val, val);
+            map1 = test::black_box(map1.plus(val, val));
         }
     })
 }
@@ -105,7 +105,7 @@ fn bench_hamt_remove<IS: ItemStore<u64, u64>>(empty: HamtMap<u64, u64, IS>, coun
         let mut map = map.clone();
 
         for x in (0 .. count).filter(|x| x % 2 == 0) {
-            map = map.minus(&keys[x]);
+            map = test::black_box(map.minus(&keys[x]));
         }
     })
 }
@@ -120,13 +120,13 @@ fn bench_std_hashmap_find(count: usize, bh: &mut Bencher) {
 
     bh.iter(|| {
         for i in (0usize .. BENCH_FIND_COUNT) {
-            let val = values[i % count];
+            let val = test::black_box(values[i % count]);
 
             // lets make about half of the lookups fail
             let val = val + (i as u64 & 1);
 
             unsafe {
-                match map.get(&val) {
+                match test::black_box(map.get(&val)) {
                     Some(&x) => RESULTS[i] = Some(x),
                     None => RESULTS[i] = None,
                 }
@@ -147,8 +147,8 @@ fn bench_std_hashmap_insert(count: usize, bh: &mut Bencher) {
         let mut map1 = map.clone();
 
         for i in (0usize .. BENCH_INSERT_COUNT) {
-            let val = values[count + i];
-            map1.insert(val, val);
+            let val = test::black_box(values[count + i]);
+            test::black_box(map1.insert(val, val));
         }
     })
 }
@@ -162,7 +162,7 @@ fn bench_std_hashmap_clone(count: usize, bh: &mut Bencher) {
     }
 
     bh.iter(|| {
-        map.clone();
+        test::black_box(map.clone());
     })
 }
 
@@ -178,7 +178,7 @@ fn bench_std_hashmap_remove(count: usize, bh: &mut Bencher) {
         let mut map1 = map.clone();
 
         for x in (0..count).filter(|x| x % 2 == 0) {
-            map1.remove(&values[x]);
+            test::black_box(map1.remove(&values[x]));
         }
     })
 }
