@@ -37,6 +37,19 @@ use item_store::{ItemStore, ShareStore};
 use std::collections::hash_map::DefaultHasher as StdHasher;
 use libc;
 
+#[cfg(not(double_wide_nodes))]
+type MaskType = u32;
+#[cfg(not(double_wide_nodes))]
+type EntryTypesType = u64;
+#[cfg(not(double_wide_nodes))]
+const ENTRY_TYPES_MAX: EntryTypesType = ::std::u64::MAX;
+
+#[cfg(double_wide_nodes)]
+type MaskType = u64;
+#[cfg(double_wide_nodes)]
+type EntryTypesType = u128;
+#[cfg(double_wide_nodes)]
+const ENTRY_TYPES_MAX: EntryTypesType = ::std::u128::MAX;
 
 //=-------------------------------------------------------------------------------------------------
 // NodeRef
@@ -135,7 +148,6 @@ const MIN_CAPACITY: usize = 4;
 struct AlignmentStruct<K, V, IS, H> {
     _a: Arc<Vec<IS>>,
     _b: IS,
-    //_c: NodeRef<K, V, IS, H>
     _c: *const (),
     _k: ::std::marker::PhantomData<K>,
     _v: ::std::marker::PhantomData<V>,
@@ -160,9 +172,9 @@ struct UnsafeNode<K, V, IS, H> {
     // The entry types of the of this node. Each two bits encode the type of one entry
     // (key-value pair, subtree ref, or collision entry). See get_entry_type_code() and the above
     // constants to learn about the encoding.
-    entry_types: u64,
+    entry_types: EntryTypesType,
     // A mask stating at which local keys (an integer between 0 and 31) an entry is exists.
-    mask: u32,
+    mask: MaskType,
     // The maximum number of entries this node can store.
     capacity: u8,
     // An artificial field ensuring the correct alignment of entries behind this header.
@@ -253,7 +265,7 @@ impl<'a, K, V, IS, H> UnsafeNode<K, V, IS, H>
         debug_assert!(index < self.entry_count());
         debug_assert!(type_code <= 0b11 && type_code != INVALID_ENTRY);
         self.entry_types = (self.entry_types & !(0b11 << (index * 2))) |
-                           ((type_code as u64) << (index * 2));
+                           ((type_code as EntryTypesType) << (index * 2));
     }
 
     // Get a raw pointer the an entry.
@@ -337,7 +349,7 @@ impl<'a, K, V, IS, H> UnsafeNode<K, V, IS, H>
     // allocated from the exchange heap. The capacity of the node is fixed from here on after.
     // The entries (including the entry_types bitfield) is not initialized by this call. Entries
     // must be initialized properly with init_entry() after allocation.
-    fn alloc(mask: u32, capacity: usize) -> NodeRef<K, V, IS, H> {
+    fn alloc(mask: MaskType, capacity: usize) -> NodeRef<K, V, IS, H> {
         debug_assert!(size_of_zero_entry_array::<K, V, IS, H>() == 0);
         fn size_of_zero_entry_array<K, V, IS, H>() -> usize {
             let node: UnsafeNode<K, V, IS, H> = UnsafeNode {
@@ -941,7 +953,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
                            new_entry: NodeEntryOwned<K, V, IS, H>)
                         -> NodeRef<K, V, IS, H> {
         let replace_old_entry = (self.mask & (1 << local_key)) != 0;
-        let new_mask: u32 = self.mask | (1 << local_key);
+        let new_mask: MaskType = self.mask | (1 << local_key);
         let mut new_node_ref = UnsafeNode::alloc(new_mask, self.expanded_capacity());
 
         {
@@ -986,7 +998,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
     fn insert_entry_in_place(&mut self,
                              local_key: usize,
                              new_entry: NodeEntryOwned<K, V, IS, H>) {
-        let new_mask: u32 = self.mask | (1 << local_key);
+        let new_mask: MaskType = self.mask | (1 << local_key);
         let replace_old_entry = new_mask == self.mask;
         let index = get_index(new_mask, local_key);
 
@@ -1008,7 +1020,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
                         UnsafeNode::<K, V, IS, H>::node_entry_size();
                     ptr::copy(source, dest, count);
 
-                    let type_mask_up_to_index: u64 = 0xFFFFFFFFFFFFFFFFu64 << ((index + 1) * 2);
+                    let type_mask_up_to_index: EntryTypesType = ENTRY_TYPES_MAX << ((index + 1) * 2);
                     self.entry_types = ((self.entry_types << 2) & type_mask_up_to_index) |
                                        (self.entry_types & !type_mask_up_to_index);
                 }
@@ -1083,7 +1095,7 @@ impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
                     UnsafeNode::<K, V, IS, H>::node_entry_size();
                 ptr::copy(source, dest, count);
 
-                let type_mask_up_to_index: u64 = 0xFFFFFFFFFFFFFFFFu64 << ((index + 1) * 2);
+                let type_mask_up_to_index: EntryTypesType = ENTRY_TYPES_MAX << ((index + 1) * 2);
                 self.entry_types = ((self.entry_types & type_mask_up_to_index) >> 2) |
                                    (self.entry_types & !(type_mask_up_to_index >> 2));
             }
@@ -1571,7 +1583,7 @@ Iterator for HamtMapIterator<'a, K, V, IS, H>
 // Utility functions
 //=------------------------------------------------------------------------------------------------
 #[inline]
-fn get_index(mask: u32, index: usize) -> usize {
+fn get_index(mask: MaskType, index: usize) -> usize {
     debug_assert!((mask & (1 << index)) != 0);
 
     let bits_set_up_to_index = (1 << index) - 1;
@@ -1581,13 +1593,13 @@ fn get_index(mask: u32, index: usize) -> usize {
 }
 
 #[inline]
-fn bit_count(x: u32) -> usize {
+fn bit_count(x: MaskType) -> usize {
     x.count_ones() as usize
 }
 
 #[inline]
 fn align_to(size: usize, align: usize) -> usize {
-    debug_assert!(align != 0 && bit_count(align as u32) == 1);
+    debug_assert!(align != 0 && bit_count(align as MaskType) == 1);
     (size + align - 1) & !(align - 1)
 }
 
