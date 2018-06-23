@@ -23,7 +23,7 @@ use std::sync::Arc;
 //=-------------------------------------------------------------------------------------------------
 // trait ItemStore
 //=-------------------------------------------------------------------------------------------------
-pub trait ItemStore<K, V>: Clone+Send+Sync {
+pub trait ItemStore<K, V>: Clone {
     fn key<'a>(&'a self) -> &'a K;
     fn val<'a>(&'a self) -> &'a V;
 
@@ -40,7 +40,7 @@ pub struct CopyStore<K, V> {
     val: V
 }
 
-impl<K: Clone+Send+Sync, V: Clone+Send+Sync> ItemStore<K, V> for CopyStore<K, V> {
+impl<K: Clone, V: Clone> ItemStore<K, V> for CopyStore<K, V> {
     fn key<'a>(&'a self) -> &'a K { &self.key }
     fn val<'a>(&'a self) -> &'a V { &self.val }
 
@@ -52,7 +52,7 @@ impl<K: Clone+Send+Sync, V: Clone+Send+Sync> ItemStore<K, V> for CopyStore<K, V>
     }
 }
 
-impl<K: Clone+Send+Sync, V: Clone+Send+Sync> Clone for CopyStore<K, V> {
+impl<K: Clone, V: Clone> Clone for CopyStore<K, V> {
     fn clone(&self) -> CopyStore<K, V> {
         CopyStore {
             key: self.key.clone(),
@@ -61,12 +61,16 @@ impl<K: Clone+Send+Sync, V: Clone+Send+Sync> Clone for CopyStore<K, V> {
     }
 }
 
+unsafe impl <K, V> Send for CopyStore<K, V> where K: Send, V: Send { }
+
+unsafe impl <K, V> Sync for CopyStore<K, V> where K: Sync, V: Sync { }
+
 
 
 //=-------------------------------------------------------------------------------------------------
 // struct ShareStore
 //=-------------------------------------------------------------------------------------------------
-pub struct ShareStore<K, V> {
+pub struct ShareStore<K: Sync + Send, V: Sync+ Send> {
     store: Arc<(K, V)>,
 }
 
@@ -86,3 +90,7 @@ impl<K: Send+Sync, V: Send+Sync> Clone for ShareStore<K, V> {
         }
     }
 }
+
+unsafe impl <K, V> Send for ShareStore<K, V> where K: Send + Sync, V: Send + Sync { }
+
+unsafe impl <K, V> Sync for ShareStore<K, V> where K: Send + Sync, V: Send + Sync { }
