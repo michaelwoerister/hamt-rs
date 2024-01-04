@@ -1,3 +1,7 @@
+**THIS PROJECT IS ARCHIVED**
+
+Feel free to fork and bring up-to-date. HAMTs are awesome -- but with Rust's ownership and borrowing semantics I found persistent data structures to be needed less often.
+
 hamt-rs [![Build Status](https://travis-ci.org/michaelwoerister/hamt-rs.svg?branch=master)](https://travis-ci.org/michaelwoerister/hamt-rs)
 ============================
 
