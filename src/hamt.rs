@@ -73,8 +73,7 @@ enum BorrowedNodeRef<'a, K, V, IS, H>
 }
 
 impl<K, V, IS, H> NodeRef<K, V, IS, H>
-    where K: Eq+Send+Sync,
-          V: Send+Sync,
+    where K: Eq,
           IS: ItemStore<K, V>,
           H: Hasher
 {
@@ -195,9 +194,7 @@ enum NodeEntryRef<'a, K, V, IS, H>
 }
 
 impl<'a, K, V, IS, H> NodeEntryRef<'a, K, V, IS, H>
-    where K: Send+Sync,
-          V: Send+Sync,
-          IS: ItemStore<K, V>
+    where IS: ItemStore<K, V>
 {
     // Clones the contents of a NodeEntryRef into a NodeEntryOwned value to be used elsewhere.
     fn clone_out(&self) -> NodeEntryOwned<K, V, IS, H> {
@@ -418,8 +415,7 @@ impl<'a, K, V, IS, H> UnsafeNode<K, V, IS, H>
 
 // impl UnsafeNode (continued)
 impl<K, V, IS, H> UnsafeNode<K, V, IS, H>
-    where K: Eq+Send+Sync+Hash,
-          V: Send+Sync,
+    where K: Eq+Hash,
           IS: ItemStore<K, V>,
           H: Hasher+Default
 {
@@ -1171,8 +1167,7 @@ pub struct HamtMap<K, V, IS=ShareStore<K,V>, H=StdHasher> {
 
 // impl HamtMap
 impl<K, V, IS, H> HamtMap<K, V, IS, H>
-    where K: Eq+Send+Sync+Hash,
-          V: Send+Sync,
+    where K: Eq+Hash,
           IS: ItemStore<K, V>,
           H: Hasher+Default
 {
@@ -1368,8 +1363,7 @@ impl<K, V, IS, H> Clone for HamtMap<K, V, IS, H> {
 
 // Default for HamtMap
 impl<K, V, IS, H> Default for HamtMap<K, V, IS, H>
-    where K: Eq+Send+Sync+Hash,
-          V: Send+Sync,
+    where K: Eq+Hash,
           IS: ItemStore<K, V>,
           H: Hasher+Default
 {
@@ -1379,8 +1373,8 @@ impl<K, V, IS, H> Default for HamtMap<K, V, IS, H>
 }
 
 impl<'a, K, V, IS, H> IntoIterator for &'a HamtMap<K, V, IS, H>
-    where K: Eq+Send+Sync+Hash+'a,
-          V: Send+Sync+'a,
+    where K: Eq+Hash+'a,
+          V: 'a,
           IS: ItemStore<K, V>+'a,
           H: Hasher+Default+'a
 {
@@ -1395,8 +1389,8 @@ impl<'a, K, V, IS, H> IntoIterator for &'a HamtMap<K, V, IS, H>
 
 // Eq for HamtMap
 impl<K, V, IS, H> PartialEq for HamtMap<K, V, IS, H>
-    where K: Eq+Send+Sync+Hash,
-          V: PartialEq+Send+Sync,
+    where K: Eq+Hash,
+          V: PartialEq,
           IS: ItemStore<K, V>,
           H: Hasher+Default
 {
@@ -1429,8 +1423,8 @@ impl<K, V, IS, H> PartialEq for HamtMap<K, V, IS, H>
 
 // Eq for HamtMap
 impl<K, V, IS, H> Eq for HamtMap<K, V, IS, H>
-    where K: Eq+Send+Sync+Hash,
-          V: Eq+Send+Sync,
+    where K: Eq+Hash,
+          V: Eq,
           IS: ItemStore<K, V>,
           H: Hasher+Default
 {
@@ -1439,8 +1433,7 @@ impl<K, V, IS, H> Eq for HamtMap<K, V, IS, H>
 
 // FromIterator
 impl<K, V, IS, H> ::std::iter::FromIterator<(K, V)> for HamtMap<K, V, IS, H>
-    where K: Eq+Send+Sync+Hash,
-          V: Send+Sync,
+    where K: Eq+Hash,
           IS: ItemStore<K, V>,
           H: Hasher+Default
 {
@@ -1499,8 +1492,7 @@ pub struct HamtMapIterator<'a, K, V, IS, H>
 
 impl<'a, K, V, IS, H>
 HamtMapIterator<'a, K, V, IS, H>
-    where K: Eq+Send+Sync,
-          V: Send+Sync,
+    where K: Eq,
           IS: ItemStore<K, V>,
           H: Hasher
 {
@@ -1518,8 +1510,7 @@ HamtMapIterator<'a, K, V, IS, H>
 
 impl<'a, K, V, IS, H>
 Iterator for HamtMapIterator<'a, K, V, IS, H>
-    where K: Eq+Send+Sync,
-          V: Send+Sync,
+    where K: Eq,
           IS: ItemStore<K, V>,
           H: 'a + Hasher
 {
